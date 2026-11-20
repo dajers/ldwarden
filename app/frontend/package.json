@@ -1,0 +1,9 @@
+{
+  "name": "sakura-flow",
+  "private": true,
+  "type": "module",
+  "description": "Sakura Flow frontend for LDWarden",
+  "scripts": {
+    "check": "node --check js/app.js && node --check js/api.js && node --check js/blocks.js && node --check js/engine.js"
+  }
+}

@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local data and secrets
+data/
+.env
+*.log
+
+# Local models (large binaries)
+llms/*.gguf
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Reports generated during demos
+*.sarif

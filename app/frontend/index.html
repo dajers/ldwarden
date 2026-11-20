@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sakura Flow — конструктор проверок безопасности</title>
+  <meta name="description" content="Визуальный конструктор сценариев проверки безопасности: секреты, зависимости, SAST и объяснения от AI." />
+  <script>
+    // тема ставится до первой отрисовки, чтобы не было вспышки
+    try {
+      var saved = localStorage.getItem('sakura.theme');
+      if (saved === 'mono' || saved === 'warden') document.documentElement.dataset.theme = saved;
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- фоновые лепестки -->
+  <div class="bg-petals" aria-hidden="true">
+    <svg class="petal petal--1" viewBox="0 0 40 40"><path d="M20 3c6 5 11 11 11 18a11 11 0 0 1-22 0C9 14 14 8 20 3Z"/></svg>
+    <svg class="petal petal--2" viewBox="0 0 40 40"><path d="M20 3c6 5 11 11 11 18a11 11 0 0 1-22 0C9 14 14 8 20 3Z"/></svg>
+    <svg class="petal petal--3" viewBox="0 0 40 40"><path d="M20 3c6 5 11 11 11 18a11 11 0 0 1-22 0C9 14 14 8 20 3Z"/></svg>
+    <svg class="petal petal--4" viewBox="0 0 40 40"><path d="M20 3c6 5 11 11 11 18a11 11 0 0 1-22 0C9 14 14 8 20 3Z"/></svg>
+  </div>
+
+  <!-- иконки -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 4.8v14.4L19.5 12Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/><path d="M12 8v4.5l3 1.8"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z"/><path d="M4 8.5 12 13l8-4.5M12 13v7"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.5" cy="12" r="3.5"/><path d="M12 12h8M17.5 12v3M20 12v2"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5Z"/><path d="M8 5.2 16 9.8v4.6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.5-7 9-4.1-1.5-7-4.8-7-9V6Z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="9" r="2.2"/><path d="M7 8.2v7.6M7 12h4a6 6 0 0 0 6-6"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M20.5 3.5 3.8 10.2l6 2.5 2.5 6Z"/><path d="M9.8 12.7 20.5 3.5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6Z"/><path d="M13 3.5v5h5"/><path d="M9 13h6M9 16.5h4"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4h5v2.5"/><path d="M6.5 6.5 7.5 20h9l1-13.5"/><path d="M10.5 10v6M13.5 10v6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 21 20H3Z"/><path d="M12 9.5v4.5M12 17.2v.1"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h11l4 4v12H5Z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40"><path d="M20 3c6 5 11 11 11 18a11 11 0 0 1-22 0C9 14 14 8 20 3Z" fill="currentColor"/></svg>
+      </span>
+      <span class="brand__text">
+        <strong>Sakura Flow</strong>
+        <small>конструктор проверок безопасности</small>
+      </span>
+    </div>
+
+    <div class="topbar__meta">
+      <span class="tag">Cyber Garden 2026</span>
+      <span class="pill" id="aiPill"><span class="pill__dot"></span>AI · локальная модель</span>
+      <span class="pill pill--quiet" id="savePill"><svg class="icon icon--xs"><use href="#i-save"/></svg>Черновик сохранён</span>
+    </div>
+
+    <div class="topbar__actions">
+      <div class="theme-switch" id="themeSwitch">
+        <button class="theme-switch__trigger" id="themeBtn" type="button" aria-label="Сменить тему оформления" aria-haspopup="true" aria-expanded="false" title="Тема оформления">
+          <img src="assets/palm.jpg" alt="" />
+        </button>
+        <div class="theme-menu" id="themeMenu" role="menu" aria-label="Темы оформления">
+          <button class="theme-option" type="button" role="menuitem" data-theme="sakura">
+            <img src="assets/sakura.jpg" alt="" /><span>Сакура</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="mono">
+            <img src="assets/yin-yang.webp" alt="" /><span>Черно-белый</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="warden">
+            <img src="assets/shield.webp" alt="" /><span>Варден</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
+        </div>
+      </div>
+      <button class="btn btn--ghost" id="historyBtn" type="button">
+        <svg class="icon"><use href="#i-history"/></svg>История
+      </button>
+      <button class="btn btn--primary" id="runBtn" type="button">
+        <svg class="icon" id="runIcon"><use href="#i-play"/></svg>
+        <span id="runLabel">Запустить</span>
+        <kbd>⌘↵</kbd>
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel palette" aria-label="Палитра блоков">
+      <div class="panel__head">
+        <h2>Блоки</h2>
+        <span class="panel__hint">перетащите на холст</span>
+      </div>
+      <div class="palette__body" id="palette"></div>
+    </aside>
+
+    <section class="panel canvas" aria-label="Рабочая область">
+      <div class="canvas__head">
+        <div class="presets" id="presets" role="group" aria-label="Готовые пресеты"></div>
+        <div class="canvas__status" aria-live="polite">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Готов к запуску</span>
+        </div>
+      </div>
+
+      <div class="canvas__body" id="canvasBody">
+        <div class="viewport" id="viewport">
+          <div class="world" id="world">
+            <svg class="wires" id="wires" aria-hidden="true"><g id="wiresGroup"></g><path id="tempWire" class="wire__temp" d=""></path></svg>
+            <div class="nodes" id="nodes"></div>
+          </div>
+        </div>
+
+        <div class="canvas__tools">
+          <button class="tool" id="zoomOut" type="button" aria-label="Уменьшить">−</button>
+          <button class="tool tool--wide" id="zoomLabel" type="button" title="Сбросить масштаб">100%</button>
+          <button class="tool" id="zoomIn" type="button" aria-label="Увеличить">+</button>
+          <span class="tool-sep"></span>
+          <button class="tool tool--wide" id="fitView" type="button">Вписать</button>
+        </div>
+
+        <div class="empty" id="empty">
+          <div class="empty__art" aria-hidden="true">
+            <svg viewBox="0 0 120 90">
+              <rect x="14" y="12" width="92" height="20" rx="8" class="ea-a"/>
+              <rect x="14" y="38" width="70" height="20" rx="8" class="ea-b"/>
+              <rect x="14" y="64" width="82" height="20" rx="8" class="ea-c"/>
+              <circle cx="104" cy="22" r="3" class="ea-dot"/>
+            </svg>
+          </div>
+          <h3>Соберите граф проверки</h3>
+          <p>Перетащите узлы из палитры и соедините пины проводами — или начните с пресета.</p>
+        </div>
+      </div>
+
+      <div class="canvas__foot">
+        <span id="footStats">0 узлов</span>
+        <span class="dot-sep">·</span>
+        <span>перетащите узел за шапку · потяните от пина, чтобы соединить</span>
+        <span class="dot-sep">·</span>
+        <span>колесо — масштаб, фон — панорама, Del — удалить</span>
+      </div>
+    </section>
+
+    <aside class="panel inspector" id="inspector" aria-label="Параметры блока"></aside>
+  </main>
+
+  <section class="drawer" id="drawer" aria-label="Результаты проверки">
+    <div class="drawer__head">
+      <div class="drawer__tabs" role="tablist" aria-label="Представление результатов">
+        <button class="tab is-active" role="tab" type="button" data-view="findings">
+          Находки <span class="badge" id="countBadge">0</span>
+        </button>
+        <button class="tab" role="tab" type="button" data-view="ai">AI-сводка</button>
+        <button class="tab" role="tab" type="button" data-view="report">Отчёт</button>
+      </div>
+      <div class="drawer__actions">
+        <button class="btn btn--ghost btn--sm" id="exportJson" type="button">JSON</button>
+        <button class="btn btn--ghost btn--sm" id="exportMd" type="button">Отчёт .md</button>
+        <button class="icon-btn" id="closeDrawer" type="button" aria-label="Закрыть результаты">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="drawer__body">
+      <div class="view" id="viewFindings">
+        <div class="stats" id="stats"></div>
+        <div class="findings-grid">
+          <div class="findings-list" id="findingsList"></div>
+          <article class="finding-detail" id="findingDetail" hidden></article>
+        </div>
+      </div>
+      <div class="view" id="viewAi" hidden></div>
+      <div class="view" id="viewReport" hidden></div>
+    </div>
+  </section>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal__backdrop" data-close-modal></div>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal__head">
+        <h2 id="modalTitle">История запусков</h2>
+        <button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="modal__body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="edge-menu" id="edgeMenu" hidden role="dialog" aria-label="Цвет связи">
+    <div class="edge-menu__title">Цвет связи</div>
+    <div class="edge-menu__swatches" id="edgeSwatches">
+      <button class="edge-swatch edge-swatch--theme" type="button" data-color="theme" title="Цвет темы"></button>
+      <button class="edge-swatch" type="button" data-color="#e05252" style="--sw:#e05252" title="Критично"></button>
+      <button class="edge-swatch" type="button" data-color="#e0913c" style="--sw:#e0913c" title="Внимание"></button>
+      <button class="edge-swatch" type="button" data-color="#e3c04a" style="--sw:#e3c04a" title="Заметка"></button>
+      <button class="edge-swatch" type="button" data-color="#4fa870" style="--sw:#4fa870" title="Готово"></button>
+      <label class="edge-swatch edge-swatch--custom" title="Свой цвет">
+        <input type="color" id="edgeCustom" value="#d9738f" />
+      </label>
+    </div>
+    <button class="edge-menu__reset" id="edgeReset" type="button">Вернуть цвет темы</button>
+    <button class="edge-menu__reset edge-menu__delete" id="edgeDelete" type="button">Удалить связь</button>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script>
+    // ES-модули не грузятся с file:// — подсказываем, как открыть правильно.
+    if (location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', function () {
+        var box = document.createElement('div');
+        box.className = 'file-warning';
+        box.setAttribute('role', 'alert');
+        var title = document.createElement('strong');
+        title.textContent = 'Откройте страницу через локальный сервер';
+        var text = document.createElement('span');
+        text.textContent = 'python3 -m http.server 8000 — и перейдите на http://localhost:8000/';
+        box.append(title, text);
+        document.body.append(box);
+      });
+    }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
