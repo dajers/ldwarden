@@ -19,17 +19,6 @@ const TYPE_FROM_BACKEND = Object.fromEntries(
   Object.entries(TYPE_TO_BACKEND).map(([front, back]) => [back, front]),
 );
 
-const CHANNEL_TO_BACKEND = {
-  Telegram: 'telegram',
-  'HTTP webhook': 'webhook',
-  'E-mail': 'smtp',
-};
-const CHANNEL_FROM_BACKEND = {
-  telegram: 'Telegram',
-  webhook: 'HTTP webhook',
-  smtp: 'E-mail',
-};
-
 const FIELD_TO_BACKEND = {
   total: 'findings.total',
   critical: 'findings.CRITICAL',
@@ -185,25 +174,21 @@ function mapParamsToBackend(node) {
         threads: Number(params.threads) || 4,
         timeout: Number(params.timeout) || 45,
       };
-    case 'notify.send': {
-      const channel = CHANNEL_TO_BACKEND[params.channel] || 'telegram';
-      const base = {
-        channel,
+    case 'notify.send':
+      return {
+        channel: 'smtp',
+        host: params.host || '',
+        port: Number(params.port) || 587,
+        username: params.username || '',
+        password: params.password || '',
+        from_addr: params.fromAddr || '',
+        to_addr: params.toAddr || '',
+        use_tls: params.useTls !== false,
+        use_ssl: Boolean(params.useSsl),
+        subject: params.subject || 'ldwarden: отчёт о проверке',
         attach_report: params.attachReport !== false,
         dry_run: Boolean(params.dryRun),
       };
-      if (channel === 'telegram') {
-        return { ...base, bot_token: params.token || '', chat_id: params.chatId || '' };
-      }
-      if (channel === 'webhook') {
-        return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
-      }
-      return {
-        ...base,
-        password: params.token || '',
-        to_addr: params.chatId || '',
-      };
-    }
     case 'report.build':
       return { formats: FORMATS_FROM_LABEL[params.formats] || ['md', 'json'] };
     default:
@@ -252,21 +237,20 @@ function mapParamsFromBackend(node) {
         threads: params.threads || 4,
         timeout: params.timeout || 45,
       };
-    case 'notify.send': {
-      const channel = CHANNEL_FROM_BACKEND[params.channel] || 'Telegram';
-      let token = '';
-      if (params.channel === 'webhook') token = params.url || '';
-      else if (params.channel === 'smtp') token = params.password || '';
-      else token = params.bot_token || '';
+    case 'notify.send':
       return {
-        channel,
-        token,
-        chatId: params.chat_id || params.to_addr || '',
+        host: params.host || '',
+        port: params.port || 587,
+        username: params.username || '',
+        password: params.password || '',
+        fromAddr: params.from_addr || params.username || '',
+        toAddr: params.to_addr || '',
+        useTls: params.use_tls !== false,
+        useSsl: Boolean(params.use_ssl),
+        subject: params.subject || 'ldwarden: отчёт о проверке',
         attachReport: params.attach_report !== false,
         dryRun: Boolean(params.dry_run),
-        hmacSecret: params.secret || '',
       };
-    }
     case 'report.build': {
       const formats = Array.isArray(params.formats) ? params.formats.slice().sort().join(',') : 'json,md';
       return { formats: FORMATS_TO_LABEL[formats] || 'JSON + Markdown' };
@@ -687,25 +671,6 @@ async function run(workflow, handlers = {}, token = { cancelled: false }) {
   }
 }
 
-async function telegramConnect() {
-  return request('/telegram/connect', { method: 'POST' });
-}
-
-async function telegramChats(state) {
-  return request(`/telegram/chats?state=${encodeURIComponent(state)}`);
-}
-
-async function telegramLink(state, chatId, workflowId) {
-  return request('/telegram/link', {
-    method: 'POST',
-    body: {
-      state,
-      chat_id: String(chatId),
-      workflow_id: workflowId || undefined,
-    },
-  });
-}
-
 async function health() {
   if (!remoteAvailable) return null;
   try {
@@ -721,9 +686,6 @@ export const api = {
   loadWorkflow,
   saveWorkflow,
   health,
-  telegramConnect,
-  telegramChats,
-  telegramLink,
   toBackendGraph,
   fromBackendWorkflow,
   get isRemote() {

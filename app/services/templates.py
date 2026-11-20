@@ -44,7 +44,7 @@ def _full_audit_graph() -> dict:
                     1540,
                     280,
                     "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox", "attach_report": True},
+                    {"channel": "smtp", "host": "", "port": 587, "to_addr": "", "dry_run": True, "attach_report": True},
                 ),
             ],
             "edges": [
@@ -77,7 +77,7 @@ def _secrets_only_graph() -> dict:
                     1520,
                     200,
                     "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    {"channel": "smtp", "host": "", "port": 587, "to_addr": "", "dry_run": True, "attach_report": True},
                 ),
             ],
             "edges": [
@@ -123,7 +123,7 @@ def _ci_gate_graph() -> dict:
                     1840,
                     300,
                     "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    {"channel": "smtp", "host": "", "port": 587, "to_addr": "", "dry_run": True, "attach_report": True},
                 ),
             ],
             "edges": [
@@ -167,7 +167,7 @@ def _daily_graph() -> dict:
                     1540,
                     280,
                     "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    {"channel": "smtp", "host": "", "port": 587, "to_addr": "", "dry_run": True, "attach_report": True},
                 ),
             ],
             "edges": [
@@ -216,7 +216,7 @@ def _quick_smoke_graph() -> dict:
                     1540,
                     280,
                     "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    {"channel": "smtp", "host": "", "port": 587, "to_addr": "", "dry_run": True, "attach_report": True},
                 ),
             ],
             "edges": [

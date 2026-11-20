@@ -885,44 +885,6 @@ function inspectorHead(kicker, title, iconName) {
   );
 }
 
-async function connectTelegram(node) {
-  try {
-    const session = await api.telegramConnect();
-    const link = document.createElement('a');
-    link.href = session.connect_url;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    toast('В Telegram нажмите Start — ждём подключение…', 'info');
-    const started = Date.now();
-    while (Date.now() - started < 90000) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const result = await api.telegramChats(session.state);
-      if (result.items && result.items.length) {
-        const chat = result.items[0];
-        node.params.chatId = String(chat.chat_id);
-        saveWorkflow();
-        renderInspector();
-        try {
-          const saved = await api.saveWorkflow(state.workflow);
-          if (saved && saved.id && result.items.length === 1) {
-            await api.telegramLink(session.state, chat.chat_id, saved.id);
-          }
-        } catch {
-          /* привязка не критична, chat_id уже в ноде */
-        }
-        toast(`Telegram подключён: ${chat.title || chat.chat_id}`, 'ok');
-        return;
-      }
-    }
-    toast('Не дождались Start в Telegram', 'warn');
-  } catch (error) {
-    toast(error && error.message ? error.message : 'Не удалось подключить Telegram', 'warn');
-  }
-}
-
 function renderInspector() {
   const root = $('#inspector');
   const visible = Boolean(state.selectedNode);
@@ -945,15 +907,6 @@ function renderInspector() {
 
   const body = h('div', { class: 'inspector__body' });
   for (const param of def.params) body.append(renderField(node, param));
-  if (api.isRemote && node.type === 'notify.send' && node.params.channel === 'Telegram') {
-    const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
-    connect.addEventListener('click', () => connectTelegram(node));
-    body.append(
-      h('div', { class: 'field' },
-        connect,
-        h('p', { class: 'field__hint', text: 'Откроется бот. Нажмите Start — Chat ID подставится автоматически.' })),
-    );
-  }
   const output = state.outputs[node.id];
   body.append(
     h('div', { class: 'field' },
