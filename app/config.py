@@ -80,8 +80,8 @@ class Settings:
     llm_timeout: int = 180
     llm_max_findings: int = 30
     llm_temperature: float = 0.2
-    llm_n_ctx: int = 8192
-    llm_n_threads: int = 0
+    llm_n_ctx: int = 4096
+    llm_n_threads: int = 4
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
@@ -92,6 +92,8 @@ class Settings:
     allow_local_webhooks: bool = True
     allowed_git_hosts: list[str] = field(default_factory=list)
     git_timeout: int = 120
+    git_token: str = ""
+    git_username: str = "x-access-token"
 
 
     enable_scheduler: bool = False
@@ -188,6 +190,10 @@ class Settings:
             "max_file_bytes": self.max_file_bytes,
             "max_files": self.max_files,
             "frontend": str(self.frontend_dir),
+            "git": {
+                "hosts": list(self.allowed_git_hosts),
+                "token_configured": bool(self.git_token),
+            },
             "telegram": {
                 "configured": bool(self.telegram_bot_token),
                 "chat_id_configured": bool(self.telegram_chat_id),
@@ -241,8 +247,8 @@ def load_settings(overrides: dict | None = None) -> Settings:
         llm_timeout=_int("LDWARDEN_LLM_TIMEOUT", 180),
         llm_max_findings=_int("LDWARDEN_LLM_MAX_FINDINGS", 30),
         llm_temperature=_float("LDWARDEN_LLM_TEMPERATURE", 0.2),
-        llm_n_ctx=_int("LDWARDEN_LLM_N_CTX", 8192),
-        llm_n_threads=_int("LDWARDEN_LLM_THREADS", 0),
+        llm_n_ctx=_int("LDWARDEN_LLM_N_CTX", 4096),
+        llm_n_threads=_int("LDWARDEN_LLM_THREADS", 4),
         telegram_bot_token=_str("LDWARDEN_TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=_str("LDWARDEN_TELEGRAM_CHAT_ID", ""),
         api_token=_str("LDWARDEN_API_TOKEN", ""),
@@ -251,6 +257,8 @@ def load_settings(overrides: dict | None = None) -> Settings:
         allow_local_webhooks=_bool("LDWARDEN_ALLOW_LOCAL_WEBHOOKS", True),
         allowed_git_hosts=[h.strip().lower() for h in _str("LDWARDEN_ALLOWED_GIT_HOSTS", "").split(",") if h.strip()],
         git_timeout=_int("LDWARDEN_GIT_TIMEOUT", 120),
+        git_token=_str("LDWARDEN_GIT_TOKEN", ""),
+        git_username=_str("LDWARDEN_GIT_USERNAME", "x-access-token"),
         enable_scheduler=_bool("LDWARDEN_ENABLE_SCHEDULER", False),
         scheduler_interval=_int("LDWARDEN_SCHEDULER_INTERVAL", 30),
         scheduler_timezone=_str("LDWARDEN_SCHEDULER_TZ", "UTC"),

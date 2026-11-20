@@ -93,6 +93,9 @@ class RunContext:
     duration_ms: int | None = None
     secret_values: list[str] = field(default_factory=list)
     node_states: dict[str, dict] = field(default_factory=dict)
+    source_ready: bool = False
+    target_explicit: bool = False
+    cancel_event: threading.Event | None = None
 
 
     def emit(
@@ -121,13 +124,22 @@ class RunContext:
         source_id: str | None = None,
         include: list[str] | None = None,
         exclude: list[str] | None = None,
+        git_token: str | None = None,
+        git_username: str | None = None,
     ) -> SourceTree:
         if path or source_id:
             target = {"kind": "source", "id": source_id} if source_id else {"kind": "path", "path": path}
             self.source = self.source_service.resolve(target, include=include, exclude=exclude)
             return self.source
         if self.source is None:
-            self.source = self.source_service.resolve(self.target, include=include, exclude=exclude)
+            target = self.target
+            if isinstance(target, dict) and str(target.get("kind")) == "git":
+                target = {
+                    **target,
+                    "token": git_token or target.get("token") or "",
+                    "username": git_username or target.get("username") or "",
+                }
+            self.source = self.source_service.resolve(target, include=include, exclude=exclude)
             return self.source
         if include or exclude:
             self.source = build_tree(
@@ -140,6 +152,14 @@ class RunContext:
                 exclude=exclude,
             )
         return self.source
+
+    def require_source(self) -> None:
+        if self.source_ready or self.target_explicit:
+            return
+        raise RuntimeError(
+            "Источник кода не подключён к проверке. Добавьте ноду «Репозиторий» "
+            "и соедините её с проверками (или передайте target при запуске)."
+        )
 
     def source_view(
         self,
@@ -345,6 +365,7 @@ class WorkflowEngine:
         run.status = "running"
         run.started_at = utcnow()
         run.save()
+        cancel_event = self._cancel.get(run_id) or threading.Event()
         ctx = RunContext(
             run_id=run_id,
             settings=self.settings,
@@ -357,9 +378,10 @@ class WorkflowEngine:
             engine=self,
             source_service=self.source_service,
             started_at=run.started_at,
+            target_explicit=target is not None,
+            cancel_event=cancel_event,
         )
         ctx.vars["run_params"] = run_params
-        cancel_event = self._cancel.get(run_id) or threading.Event()
         failed_nodes: set[str] = set()
         persisted: set[str] = set()
         node_states: dict[str, dict] = {}

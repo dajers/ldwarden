@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from typing import Any
 
 from app.ai.prompts import build_analysis_request
@@ -11,6 +12,12 @@ from app.config import Settings
 
 class ProviderUnavailable(RuntimeError):
     pass
+
+
+class ProviderStopped(RuntimeError):
+    def __init__(self, reason: str = "cancelled"):
+        super().__init__(reason)
+        self.reason = reason
 
 
 _PROVIDER_CACHE: dict[tuple, "LLMProvider"] = {}
@@ -26,6 +33,14 @@ def _cached(key: tuple, factory) -> "LLMProvider":
         return provider
 
 
+def _stop_reason(cancel_event, deadline: float | None) -> str | None:
+    if cancel_event is not None and cancel_event.is_set():
+        return "cancelled"
+    if deadline is not None and time.monotonic() >= deadline:
+        return "timeout"
+    return None
+
+
 class LLMProvider:
     name = "base"
     model = ""
@@ -37,6 +52,8 @@ class LLMProvider:
         response_format: dict | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.2,
+        cancel_event=None,
+        deadline: float | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -56,7 +73,7 @@ class LocalLlamaProvider(LLMProvider):
         self.model_path = model_path
         self.model = os.path.basename(model_path)
         self.n_ctx = n_ctx
-        self.n_threads = n_threads or max(1, (os.cpu_count() or 4) - 2)
+        self.n_threads = n_threads or min(4, max(1, (os.cpu_count() or 4) // 3))
         self._llm = None
         self._lock = threading.Lock()
 
@@ -76,7 +93,8 @@ class LocalLlamaProvider(LLMProvider):
                 self._llm = Llama(
                     model_path=self.model_path,
                     n_ctx=self.n_ctx,
-                    n_threads=self.n_threads,
+                    n_threads=max(1, min(16, self.n_threads)),
+                    n_batch=128,
                     n_gpu_layers=0,
                     verbose=False,
                 )
@@ -91,28 +109,56 @@ class LocalLlamaProvider(LLMProvider):
         response_format: dict | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.2,
+        cancel_event=None,
+        deadline: float | None = None,
     ) -> str:
+        stop = _stop_reason(cancel_event, deadline)
+        if stop:
+            raise ProviderStopped(stop)
         llm = self._ensure_llm()
         kwargs: dict[str, Any] = {
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "stream": True,
         }
         if response_format:
             kwargs["response_format"] = response_format
         try:
             with self._lock:
-                response = llm.create_chat_completion(**kwargs)
+                stream = llm.create_chat_completion(**kwargs)
+                if isinstance(stream, dict):
+                    return stream["choices"][0]["message"]["content"] or ""
+                parts: list[str] = []
+                for chunk in stream:
+                    stop = _stop_reason(cancel_event, deadline)
+                    if stop:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                        raise ProviderStopped(stop)
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    content = delta.get("content")
+                    if content:
+                        parts.append(content)
+                return "".join(parts)
+        except ProviderStopped:
+            raise
         except TypeError:
             kwargs.pop("response_format", None)
-            with self._lock:
-                response = llm.create_chat_completion(**kwargs)
+            kwargs.pop("stream", None)
+            try:
+                with self._lock:
+                    response = llm.create_chat_completion(**kwargs)
+                return response["choices"][0]["message"]["content"] or ""
+            except Exception as exc:
+                raise ProviderUnavailable(f"Ошибка локальной модели: {exc}") from exc
         except Exception as exc:
             raise ProviderUnavailable(f"Ошибка локальной модели: {exc}") from exc
-        try:
-            return response["choices"][0]["message"]["content"] or ""
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderUnavailable(f"Некорректный ответ локальной модели: {exc}") from exc
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -139,7 +185,12 @@ class OpenAICompatibleProvider(LLMProvider):
         response_format: dict | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.2,
+        cancel_event=None,
+        deadline: float | None = None,
     ) -> str:
+        stop = _stop_reason(cancel_event, deadline)
+        if stop:
+            raise ProviderStopped(stop)
         if not self.base_url:
             raise ProviderUnavailable("Не задан LDWARDEN_LLM_BASE_URL")
         try:
@@ -159,7 +210,10 @@ class OpenAICompatibleProvider(LLMProvider):
         if response_format:
             payload["response_format"] = response_format
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            timeout = self.timeout
+            if deadline is not None:
+                timeout = max(1.0, min(float(timeout), deadline - time.monotonic()))
+            with httpx.Client(timeout=timeout) as client:
                 response = client.post(url, json=payload, headers=headers)
                 if response.status_code == 400 and response_format:
                     payload.pop("response_format", None)
@@ -193,7 +247,11 @@ class FakeProvider(LLMProvider):
         response_format: dict | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.2,
+        cancel_event=None,
+        deadline: float | None = None,
     ) -> str:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProviderStopped("cancelled")
         if self.response is not None:
             return json.dumps(self.response, ensure_ascii=False)
         user = messages[-1]["content"] if messages else "{}"
@@ -228,8 +286,17 @@ class FakeProvider(LLMProvider):
         )
 
 
-def get_local_provider(model_path: str, n_ctx: int = 8192, n_threads: int = 0) -> LLMProvider:
+def get_local_provider(model_path: str, n_ctx: int = 4096, n_threads: int = 4) -> LLMProvider:
     key = ("local", str(model_path), int(n_ctx), int(n_threads))
+    with _PROVIDER_LOCK:
+        for cached_key in list(_PROVIDER_CACHE):
+            if (
+                cached_key[0] == "local"
+                and cached_key[1] == str(model_path)
+                and cached_key[2] == int(n_ctx)
+                and cached_key[3] != int(n_threads)
+            ):
+                _PROVIDER_CACHE.pop(cached_key, None)
     return _cached(key, lambda: LocalLlamaProvider(str(model_path), n_ctx=n_ctx, n_threads=n_threads))
 
 

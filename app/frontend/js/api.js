@@ -136,20 +136,29 @@ function targetPayload(workflow) {
   const source = (workflow.nodes || []).find((node) => node.type === 'source.repo');
   const raw = String((source && source.params && source.params.target) || '').trim();
   if (!raw || raw === 'training-project' || raw === 'training-main/training-project') return null;
-  if (/^https?:\/\//i.test(raw)) return { kind: 'git', url: raw };
+  if (/^https?:\/\//i.test(raw)) {
+    const ref = String((source && source.params && source.params.branch) || '').trim();
+    return { kind: 'git', url: raw, ...(ref && ref !== 'main' ? { ref } : {}) };
+  }
   return { kind: 'path', path: raw };
 }
 
 function mapParamsToBackend(node) {
   const params = node.params || {};
   switch (node.type) {
+    case 'trigger.webhook':
+      return { secret: params.secret || '', description: params.description || '' };
     case 'trigger.schedule':
       return {
         cron: CRON_FROM_LABEL[params.cron] || String(params.cron || '0 14 * * *'),
         timezone: 'UTC',
       };
     case 'source.repo':
-      return { path: /^https?:\/\//i.test(String(params.target || '')) ? '' : normalizeTarget(params.target) };
+      return {
+        path: /^https?:\/\//i.test(String(params.target || '')) ? '' : normalizeTarget(params.target),
+        git_token: params.gitToken || '',
+        git_username: params.gitUsername || 'x-access-token',
+      };
     case 'scan.secret':
       return { min_severity: params.minSeverity || 'LOW' };
     case 'scan.sca':
@@ -158,9 +167,10 @@ function mapParamsToBackend(node) {
       return {};
     case 'logic.branch':
       return {
-        field: FIELD_TO_BACKEND[params.field] || 'findings.CRITICAL',
-        operator: OPERATOR_TO_BACKEND[params.op] || 'gte',
-        value: String(params.value ?? 1),
+        field: FIELD_TO_BACKEND[params.field] || params.field || 'findings.CRITICAL',
+        operator: OPERATOR_TO_BACKEND[params.operator] || params.operator || 'gte',
+        value: String(params.value ?? '1'),
+        case_sensitive: Boolean(params.caseSensitive),
       };
     case 'control.gate':
       return {
@@ -169,7 +179,12 @@ function mapParamsToBackend(node) {
         blocking: params.blocking !== false,
       };
     case 'ai.explain':
-      return { provider: 'auto' };
+      return {
+        provider: params.provider || 'auto',
+        max_findings: Number(params.maxFindings) || 12,
+        threads: Number(params.threads) || 4,
+        timeout: Number(params.timeout) || 45,
+      };
     case 'notify.send': {
       const channel = CHANNEL_TO_BACKEND[params.channel] || 'telegram';
       const base = {
@@ -181,7 +196,7 @@ function mapParamsToBackend(node) {
         return { ...base, bot_token: params.token || '', chat_id: params.chatId || '' };
       }
       if (channel === 'webhook') {
-        return { ...base, url: params.token || 'local://inbox', method: 'POST' };
+        return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
       }
       return {
         ...base,
@@ -201,10 +216,14 @@ function mapParamsFromBackend(node) {
   switch (node.type) {
     case 'trigger.schedule':
       return { cron: CRON_TO_LABEL[params.cron] || params.cron || 'Каждый день в 14:00' };
+    case 'trigger.webhook':
+      return { secret: params.secret || '', description: params.description || '' };
     case 'source.target':
       return {
         target: params.path || 'training-project',
         branch: 'main',
+        gitToken: params.git_token || '',
+        gitUsername: params.git_username || 'x-access-token',
       };
     case 'scan.secrets':
       return { minSeverity: params.min_severity || 'LOW', mask: true };
@@ -214,19 +233,24 @@ function mapParamsFromBackend(node) {
       return { lang: 'Kotlin' };
     case 'logic.if':
       return {
-        field: FIELD_FROM_BACKEND[params.field] || 'critical',
-        op: OPERATOR_FROM_BACKEND[params.operator] || '>=',
-        value: Number(params.value) || 0,
+        field: params.field || 'findings.CRITICAL',
+        operator: params.operator || 'gte',
+        value: String(params.value ?? '1'),
+        caseSensitive: Boolean(params.case_sensitive),
       };
     case 'control.severity_gate':
       return { threshold: params.threshold || 'HIGH', blocking: params.blocking !== false };
     case 'ai.analyze':
       return {
+        provider: params.provider || 'auto',
         model:
           params.provider === 'openai' || params.provider === 'ollama'
             ? 'GigaChat · API'
             : 'Qwen2.5-Coder 7B · локально',
         tone: 'Для разработчика',
+        maxFindings: params.max_findings || 12,
+        threads: params.threads || 4,
+        timeout: params.timeout || 45,
       };
     case 'notify.send': {
       const channel = CHANNEL_FROM_BACKEND[params.channel] || 'Telegram';
@@ -240,6 +264,7 @@ function mapParamsFromBackend(node) {
         chatId: params.chat_id || params.to_addr || '',
         attachReport: params.attach_report !== false,
         dryRun: Boolean(params.dry_run),
+        hmacSecret: params.secret || '',
       };
     }
     case 'report.build': {
@@ -592,7 +617,7 @@ async function saveWorkflow(workflow) {
   const graph = toBackendGraph(workflow);
   const payload = {
     name: workflow.name || 'Сценарий',
-    description: 'Сценарий Sakura Flow',
+    description: 'Сценарий ldwarden',
     graph,
   };
   try {

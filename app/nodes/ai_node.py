@@ -48,9 +48,27 @@ class AIAnalyzeNode(BaseNode):
             "number",
             "Сколько находок отдать модели",
             "Остальные получат детерминированное объяснение",
-            default=30,
+            default=12,
             min=1,
             max=200,
+        ),
+        ParamSpec(
+            "threads",
+            "number",
+            "Потоков CPU для локальной модели",
+            "Сколько ядер отдать llama.cpp; меньше — тише, но медленнее",
+            default=4,
+            min=1,
+            max=16,
+        ),
+        ParamSpec(
+            "timeout",
+            "number",
+            "Таймаут AI, секунд",
+            "После таймаута используется детерминированный fallback",
+            default=45,
+            min=5,
+            max=600,
         ),
         ParamSpec(
             "temperature",
@@ -72,12 +90,18 @@ class AIAnalyzeNode(BaseNode):
         settings = ctx.settings
         provider_name = (params.get("provider") or "auto").lower()
         model_override = (params.get("model") or "").strip()
+        threads = max(1, min(16, int(params.get("threads") or settings.llm_n_threads or 4)))
         if provider_name == "auto":
-            provider = build_provider(settings)
+            if settings.effective_llm_provider == "local":
+                provider = get_local_provider(
+                    str(settings.llm_model_path), n_ctx=settings.llm_n_ctx, n_threads=threads
+                )
+            else:
+                provider = build_provider(settings)
         elif provider_name == "local":
             model_path = model_override or str(settings.llm_model_path)
             provider = get_local_provider(
-                model_path, n_ctx=settings.llm_n_ctx, n_threads=settings.llm_n_threads
+                model_path, n_ctx=settings.llm_n_ctx, n_threads=threads
             )
         elif provider_name in {"openai", "ollama"}:
             base_url = settings.llm_base_url
@@ -105,6 +129,13 @@ class AIAnalyzeNode(BaseNode):
             llm_temperature=float(params.get("temperature", settings.llm_temperature)),
         )
         service = AIService(effective, provider=provider)
+        timeout = int(params.get("timeout") or 45)
+        ctx.emit(
+            "ai.started",
+            f"AI-анализ запущен ({provider_name}, таймаут {timeout} с)",
+            node_id=ctx.node_id,
+            payload={"provider": provider_name, "timeout": timeout, "findings": len(ctx.findings)},
+        )
         result = service.analyze(
             ctx.findings,
             meta={
@@ -113,6 +144,8 @@ class AIAnalyzeNode(BaseNode):
                 "source": ctx.source.to_dict() if ctx.source else {},
                 "counts": severity_counts(ctx.findings),
             },
+            cancel_event=getattr(ctx, "cancel_event", None),
+            timeout=timeout,
         )
         ctx.ai_analysis = result
         validation = result.get("validation") or {}

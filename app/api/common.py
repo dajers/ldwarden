@@ -202,12 +202,23 @@ def validate_target(target: Any) -> dict | str | None:
             raise ApiError(str(exc), 400, "invalid_target") from exc
         if not root.exists():
             raise ApiError("Загруженный источник не найден", 404, "not_found")
-    if kind == "git" and not settings_.allowed_git_hosts:
-        raise ApiError(
-            "Клонирование Git отключено: задайте LDWARDEN_ALLOWED_GIT_HOSTS",
-            403,
-            "git_disabled",
-        )
+    if kind == "git":
+        from urllib.parse import urlparse
+
+        if not settings_.allowed_git_hosts:
+            raise ApiError(
+                "Клонирование Git отключено: задайте LDWARDEN_ALLOWED_GIT_HOSTS",
+                403,
+                "git_disabled",
+            )
+        url = str(target.get("url") or "")
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ApiError("Разрешены только HTTPS-ссылки на Git-репозитории", 400, "invalid_target")
+        if parsed.username or parsed.password:
+            raise ApiError("Учётные данные в URL запрещены; задайте LDWARDEN_GIT_TOKEN", 400, "invalid_target")
+        if parsed.hostname.lower() not in {host.lower() for host in settings_.allowed_git_hosts}:
+            raise ApiError(f"Хост {parsed.hostname} не входит в allow-list", 403, "forbidden_git_host")
     return target
 
 

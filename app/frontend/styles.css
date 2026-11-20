@@ -1,5 +1,5 @@
 /* =========================================================
-   Sakura Flow — граф-редактор проверок безопасности
+   ldwarden — граф-редактор проверок безопасности
    Темы: сакура (по умолчанию), ч/б, варден
    ========================================================= */
 
@@ -45,6 +45,13 @@
   --cat-scan: #d9738f;
   --cat-logic: #c79a6b;
   --cat-action: #8fa98c;
+  --cat-trigger-tint: #faf6fd;
+  --cat-source-tint: #f6f8fd;
+  --cat-scan-tint: #fdf5f7;
+  --cat-logic-tint: #fdfaf4;
+  --cat-action-tint: #f6faf5;
+  --accent-text: #ffffff;
+  --low: #6e8fa8;
 
   --wire-exec: #c9788f;
   --wire-data: #5e9e96;
@@ -68,59 +75,66 @@
 
 /* ---------- тема: чёрно-белый ---------- */
 html[data-theme="mono"] {
-  --bg: #f2f2f2;
+  --bg: #050505;
   --bg-glow-1: transparent;
   --bg-glow-2: transparent;
-  --topbar: rgba(255, 255, 255, 0.9);
+  --topbar: rgba(10, 10, 10, 0.88);
 
-  --panel: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f4f4f4;
-  --surface-3: #f7f7f7;
+  --panel: #101010;
+  --surface: #151515;
+  --surface-2: #0c0c0c;
+  --surface-3: #191919;
 
-  --canvas: #fafafa;
-  --canvas-dot: #d9d9d9;
+  --canvas: #080808;
+  --canvas-dot: #242424;
 
-  --line: #dedede;
-  --line-strong: #c2c2c2;
+  --line: #292929;
+  --line-strong: #444444;
 
-  --ink: #111111;
-  --ink-soft: #2e2e2e;
-  --muted: #6a6a6a;
-  --muted-2: #9b9b9b;
+  --ink: #f4f4f4;
+  --ink-soft: #d0d0d0;
+  --muted: #949494;
+  --muted-2: #666666;
 
-  --rose: #141414;
-  --rose-d: #000000;
-  --rose-soft: #ececec;
-  --rose-ink: #111111;
-  --accent: #141414;
-  --accent-grad: linear-gradient(135deg, #2b2b2b, #111111);
-  --accent-shadow: rgba(0, 0, 0, 0.22);
-  --accent-shadow-hover: rgba(0, 0, 0, 0.32);
+  --rose: #ededed;
+  --rose-d: #ffffff;
+  --rose-soft: #1d1d1d;
+  --rose-ink: #ffffff;
+  --accent: #ededed;
+  --accent-text: #050505;
+  --accent-grad: linear-gradient(135deg, #ffffff, #cfcfcf);
+  --accent-shadow: rgba(255, 255, 255, 0.14);
+  --accent-shadow-hover: rgba(255, 255, 255, 0.24);
 
-  --ok: #1f1f1f;
-  --warn: #5c5c5c;
-  --bad: #000000;
-  --crit: #000000;
+  --ok: #d6d6d6;
+  --warn: #a3a3a3;
+  --bad: #f0f0f0;
+  --crit: #ffffff;
+  --low: #b3b3b3;
 
-  --cat-trigger: #6b6b6b;
-  --cat-source: #4d4d4d;
-  --cat-scan: #111111;
-  --cat-logic: #7a7a7a;
-  --cat-action: #3d3d3d;
+  --cat-trigger: #bdbdbd;
+  --cat-source: #9e9e9e;
+  --cat-scan: #f0f0f0;
+  --cat-logic: #c4c4c4;
+  --cat-action: #8c8c8c;
+  --cat-trigger-tint: #151515;
+  --cat-source-tint: #121212;
+  --cat-scan-tint: #1b1b1b;
+  --cat-logic-tint: #161616;
+  --cat-action-tint: #131313;
 
-  --wire-exec: #1f1f1f;
+  --wire-exec: #e6e6e6;
   --wire-data: #8a8a8a;
 
-  --code-bg: #111111;
-  --code-ink: #f4f4f4;
-  --backdrop: rgba(0, 0, 0, 0.32);
+  --code-bg: #000000;
+  --code-ink: #f5f5f5;
+  --backdrop: rgba(0, 0, 0, 0.72);
   --petal: transparent;
   --petals-visible: none;
 
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.06);
-  --shadow: 0 12px 34px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 26px 70px rgba(0, 0, 0, 0.22);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 26px 70px rgba(0, 0, 0, 0.7);
 }
 
 /* ---------- тема: варден ---------- */
@@ -165,6 +179,13 @@ html[data-theme="warden"] {
   --cat-scan: #60a5fa;
   --cat-logic: #f59e0b;
   --cat-action: #34d399;
+  --cat-trigger-tint: #171b32;
+  --cat-source-tint: #0d2235;
+  --cat-scan-tint: #101f36;
+  --cat-logic-tint: #241c10;
+  --cat-action-tint: #0e261f;
+  --accent-text: #ffffff;
+  --low: #93a9c8;
 
   --wire-exec: #60a5fa;
   --wire-data: #22d3ee;
@@ -308,7 +329,7 @@ body {
 }
 .btn:active { transform: translateY(1px); }
 .btn--primary {
-  color: #fff;
+  color: var(--accent-text, #fff);
   background: var(--accent-grad);
   box-shadow: 0 8px 20px var(--accent-shadow);
 }
@@ -403,12 +424,21 @@ body {
 .presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .presets__label { font-size: 11px; color: var(--muted-2); margin-right: 2px; }
 .preset {
+  display: inline-flex; align-items: center; gap: 7px;
   font: inherit; font-size: 11.5px; color: var(--ink-soft);
   background: var(--surface); border: 1px dashed var(--line-strong);
   padding: 5px 10px; border-radius: 999px; cursor: pointer;
   transition: all 0.15s;
 }
 .preset:hover { border-style: solid; border-color: var(--rose); color: var(--rose-ink); background: var(--rose-soft); }
+.preset--custom { border-style: solid; }
+.preset--add { border-color: var(--rose); color: var(--rose-ink); }
+.preset__remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  color: var(--muted); line-height: 1; font-size: 14px;
+}
+.preset__remove:hover { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
 
 .canvas__status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); flex: none; }
@@ -416,10 +446,19 @@ body {
 .status-dot.is-done { background: var(--ok); }
 .status-dot.is-error { background: var(--bad); }
 
+.marquee {
+  position: absolute;
+  border: 1px solid var(--rose);
+  background: color-mix(in srgb, var(--rose) 12%, transparent);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 30;
+}
+
 .canvas__body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 
 .viewport {
-  position: absolute; inset: 0; overflow: hidden; cursor: grab;
+  position: absolute; inset: 0; overflow: hidden; cursor: crosshair;
   background-color: var(--canvas);
   background-image: radial-gradient(var(--canvas-dot) 1.1px, transparent 1.1px);
   background-size: 24px 24px;
@@ -446,6 +485,7 @@ body {
 }
 .node:active { cursor: grabbing; }
 .node.is-selected { border-color: var(--rose); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rose) 26%, transparent), var(--shadow); }
+.node.is-multi-selected { border-color: var(--rose-d); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rose) 34%, transparent), var(--shadow); }
 .node.is-running { border-color: var(--rose); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rose) 18%, transparent); }
 .node.is-done { border-color: color-mix(in srgb, var(--ok) 45%, var(--line-strong)); }
 .node.is-skipped { opacity: 0.5; }

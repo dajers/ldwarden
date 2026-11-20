@@ -1,5 +1,5 @@
 /**
- * Sakura Flow — граф-редактор проверок безопасности.
+ * ldwarden — граф-редактор проверок безопасности.
  * Ноды с пинами, провода на безье, панорама и масштаб.
  */
 
@@ -35,6 +35,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const NS = 'http://www.w3.org/2000/svg';
 const LS_WORKFLOW = 'sakura.graph.v1';
 const LS_HISTORY = 'sakura.history.v1';
+const LS_PRESETS = 'sakura.presets.v1';
 
 function h(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -277,6 +278,7 @@ function initEdgeMenu() {
 const state = {
   workflow: loadWorkflow(),
   selectedNode: null,
+  selectedNodes: [],
   selectedEdge: null,
   view: { x: 0, y: 0, z: 1 },
   statuses: {},
@@ -291,6 +293,7 @@ const state = {
   history: loadHistory(),
 };
 
+let customPresets = loadCustomPresets();
 let syncTimer = null;
 let syncWarned = false;
 
@@ -324,12 +327,13 @@ async function hydrateRemote() {
     if (remote && remote.workflow && remote.workflow.nodes.length) {
       state.workflow = remote.workflow;
       state.selectedNode = null;
+      state.selectedNodes = [];
       state.selectedEdge = null;
       resetStatuses();
       renderAll();
       fitView();
       try {
-        localStorage.setItem(LS_WORKFLOW, JSON.stringify(state.workflow));
+        localStorage.setItem(LS_WORKFLOW, JSON.stringify(localSnapshot(state.workflow)));
       } catch {
         /* ignore */
       }
@@ -368,6 +372,13 @@ function normalizeGraph(raw) {
     const def = NODE_TYPES[n.type];
     const params = {};
     for (const p of def.params) params[p.key] = n.params && p.key in n.params ? n.params[p.key] : p.def;
+    if (n.type === 'logic.branch') {
+      const fields = { total: 'findings.total', critical: 'findings.CRITICAL', secret: 'findings.by_category.SECRET' };
+      const operators = { '>=': 'gte', '==': 'eq', '<=': 'lte', '>': 'gt' };
+      if (fields[params.field]) params.field = fields[params.field];
+      if (n.params && operators[n.params.op]) params.operator = operators[n.params.op];
+      params.value = String(params.value);
+    }
     return {
       id: n.id || newIdent('n'),
       type: n.type,
@@ -403,9 +414,20 @@ function loadWorkflow() {
   }
 }
 
+function localSnapshot(workflow) {
+  const copy = clone(workflow);
+  for (const node of copy.nodes || []) {
+    if (node.type === 'notify.send' && node.params && node.params.token) node.params.token = '••••••';
+    if (node.type === 'source.repo' && node.params && node.params.gitToken) node.params.gitToken = '••••••';
+    if (node.type === 'notify.send' && node.params && node.params.hmacSecret) node.params.hmacSecret = '••••••';
+    if (node.type === 'trigger.webhook' && node.params && node.params.secret) node.params.secret = '••••••';
+  }
+  return copy;
+}
+
 function saveWorkflow() {
   try {
-    localStorage.setItem(LS_WORKFLOW, JSON.stringify(state.workflow));
+    localStorage.setItem(LS_WORKFLOW, JSON.stringify(localSnapshot(state.workflow)));
   } catch {
     /* приватный режим */
   }
@@ -523,19 +545,95 @@ function defaultParams(def) {
   return params;
 }
 
-function renderPresets() {
-  const root = $('#presets');
-  root.replaceChildren(h('span', { class: 'presets__label' }, 'Пресеты:'));
-  for (const preset of PRESETS) {
-    const button = h('button', { class: 'preset', type: 'button', text: preset.name });
-    button.addEventListener('click', () => applyPreset(preset));
-    root.append(button);
+function loadCustomPresets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LS_PRESETS) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => item && item.name && item.workflow) : [];
+  } catch {
+    return [];
   }
 }
 
+function saveCustomPresets() {
+  try {
+    localStorage.setItem(LS_PRESETS, JSON.stringify(customPresets));
+  } catch {
+    /* приватный режим */
+  }
+}
+
+function saveCurrentAsPreset() {
+  const suggested = state.workflow.name && state.workflow.name !== 'Новый сценарий' ? state.workflow.name : 'Мой пресет';
+  const name = window.prompt('Название пресета', suggested);
+  if (!name || !name.trim()) return;
+  const snapshot = localSnapshot(state.workflow);
+  const preset = {
+    id: 'custom-' + Date.now().toString(36),
+    name: name.trim().slice(0, 60),
+    workflow: {
+      name: name.trim().slice(0, 60),
+      nodes: clone(snapshot.nodes),
+      edges: clone(snapshot.edges),
+    },
+  };
+  customPresets = [...customPresets.filter((item) => item.name !== preset.name), preset].slice(-20);
+  saveCustomPresets();
+  renderPresets();
+  toast(`Пресет «${preset.name}» сохранён`, 'ok');
+}
+
+function deleteCustomPreset(id) {
+  const preset = customPresets.find((item) => item.id === id);
+  if (!preset) return;
+  if (!window.confirm(`Удалить пресет «${preset.name}»?`)) return;
+  customPresets = customPresets.filter((item) => item.id !== id);
+  saveCustomPresets();
+  renderPresets();
+  toast(`Пресет «${preset.name}» удалён`, 'ok');
+}
+
+function renderPresets() {
+  const root = $('#presets');
+  root.replaceChildren(h('span', { class: 'presets__label' }, 'Пресеты:'));
+  for (const preset of [...PRESETS, ...customPresets]) {
+    const button = h('button', { class: 'preset' + (preset.workflow ? ' preset--custom' : ''), type: 'button' }, h('span', { text: preset.name }));
+    button.addEventListener('click', () => applyPreset(preset));
+    if (preset.workflow) {
+      const remove = h('span', { class: 'preset__remove', role: 'button', tabindex: '0', title: 'Удалить пресет', text: '×' });
+      remove.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteCustomPreset(preset.id);
+      });
+      remove.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          deleteCustomPreset(preset.id);
+        }
+      });
+      button.append(remove);
+    }
+    root.append(button);
+  }
+  const add = h('button', { class: 'preset preset--add', type: 'button', text: '+ Свой пресет' });
+  add.addEventListener('click', saveCurrentAsPreset);
+  root.append(add);
+}
+
 function applyPreset(preset) {
-  state.workflow = { id: 'wf-' + Date.now().toString(36), name: preset.name, ...preset.build() };
+  if (preset.workflow) {
+    state.workflow = normalizeGraph({
+      id: 'wf-' + Date.now().toString(36),
+      backendId: null,
+      name: preset.name,
+      nodes: clone(preset.workflow.nodes),
+      edges: clone(preset.workflow.edges),
+    });
+  } else {
+    state.workflow = { id: 'wf-' + Date.now().toString(36), name: preset.name, ...preset.build() };
+  }
   state.selectedNode = null;
+  state.selectedNodes = [];
   state.selectedEdge = null;
   resetStatuses();
   renderAll();
@@ -577,7 +675,8 @@ function renderNode(node) {
   const chip = state.chips[node.id] || '';
 
   const classes = ['node'];
-  if (state.selectedNode === node.id) classes.push('is-selected');
+  if (state.selectedNodes.includes(node.id)) classes.push('is-selected');
+  if (state.selectedNodes.length > 1 && state.selectedNodes.includes(node.id)) classes.push('is-multi-selected');
   if (status) classes.push('is-' + status);
 
   const el = h('div', {
@@ -620,9 +719,17 @@ function renderNode(node) {
   }
 
   el.addEventListener('pointerdown', (event) => {
+    if (event.button === 2) return;
     if (event.target.closest('.pin, .node__remove')) return;
+    if (event.button !== 0) return;
     event.stopPropagation();
-    selectNode(node.id);
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (additive) {
+      selectNode(node.id, true);
+      if (state.selectedNodes.includes(node.id)) startNodeDrag(event, node);
+      return;
+    }
+    if (!state.selectedNodes.includes(node.id)) selectNode(node.id);
     startNodeDrag(event, node);
   });
   el.addEventListener('keydown', (event) => {
@@ -667,7 +774,9 @@ function renderWires() {
     const hit = svgPath(d, 'wire__hit');
     const line = svgPath(d, 'wire__line');
     if (edge.color) line.style.stroke = edge.color;
-    hit.addEventListener('pointerdown', (event) => event.stopPropagation());
+    hit.addEventListener('pointerdown', (event) => {
+      if (event.button === 0) event.stopPropagation();
+    });
     hit.addEventListener('click', (event) => {
       event.stopPropagation();
       selectEdge(edge.id);
@@ -699,10 +808,39 @@ function updateNodeElement(id) {
 /* выбор                                                               */
 /* ------------------------------------------------------------------ */
 
-function selectNode(id) {
-  state.selectedNode = id;
+function syncSelection() {
+  for (const el of $$('.node')) {
+    const selected = state.selectedNodes.includes(el.dataset.id);
+    el.classList.toggle('is-selected', selected);
+    el.classList.toggle('is-multi-selected', selected && state.selectedNodes.length > 1);
+  }
+}
+
+function selectNode(id, additive = false) {
+  if (additive) {
+    const next = new Set(state.selectedNodes);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    state.selectedNodes = [...next];
+  } else {
+    state.selectedNodes = [id];
+  }
+  state.selectedNode = state.selectedNodes.includes(id)
+    ? id
+    : state.selectedNodes[state.selectedNodes.length - 1] || null;
   state.selectedEdge = null;
-  for (const el of $$('.node')) el.classList.toggle('is-selected', el.dataset.id === id);
+  for (const g of $$('.wire')) g.classList.remove('is-selected');
+  syncSelection();
+  renderWires();
+  renderInspector();
+}
+
+function selectMany(ids) {
+  state.selectedNodes = [...new Set(ids)];
+  state.selectedNode = state.selectedNodes[0] || null;
+  state.selectedEdge = null;
+  for (const g of $$('.wire')) g.classList.remove('is-selected');
+  syncSelection();
   renderWires();
   renderInspector();
 }
@@ -710,15 +848,17 @@ function selectNode(id) {
 function selectEdge(id) {
   state.selectedEdge = id;
   state.selectedNode = null;
+  state.selectedNodes = [];
   closeInspector();
-  for (const el of $$('.node')) el.classList.remove('is-selected');
+  for (const el of $$('.node')) el.classList.remove('is-selected', 'is-multi-selected');
   for (const g of $$('.wire')) g.classList.toggle('is-selected', g.dataset.id === id);
 }
 
 function clearSelection() {
   state.selectedNode = null;
+  state.selectedNodes = [];
   state.selectedEdge = null;
-  for (const el of $$('.node')) el.classList.remove('is-selected');
+  for (const el of $$('.node')) el.classList.remove('is-selected', 'is-multi-selected');
   for (const g of $$('.wire')) g.classList.remove('is-selected');
   renderInspector();
 }
@@ -828,6 +968,7 @@ function renderInspector() {
     const copyNode = cloneNode(node);
     state.workflow.nodes.push(copyNode);
     state.selectedNode = copyNode.id;
+    state.selectedNodes = [copyNode.id];
     renderAll();
     renderInspector();
     saveWorkflow();
@@ -894,7 +1035,23 @@ function setParam(node, key, value) {
 function deleteNode(id) {
   state.workflow.nodes = state.workflow.nodes.filter((n) => n.id !== id);
   state.workflow.edges = state.workflow.edges.filter((e) => e.from.node !== id && e.to.node !== id);
-  if (state.selectedNode === id) state.selectedNode = null;
+  state.selectedNodes = state.selectedNodes.filter((selected) => selected !== id);
+  if (state.selectedNode === id) state.selectedNode = state.selectedNodes[0] || null;
+  renderAll();
+  renderInspector();
+  saveWorkflow();
+}
+
+function deleteSelectedNodes() {
+  const ids = new Set(state.selectedNodes);
+  if (!ids.size) return;
+  state.workflow.nodes = state.workflow.nodes.filter((node) => !ids.has(node.id));
+  state.workflow.edges = state.workflow.edges.filter(
+    (edge) => !ids.has(edge.from.node) && !ids.has(edge.to.node),
+  );
+  state.selectedNodes = [];
+  state.selectedNode = null;
+  state.selectedEdge = null;
   renderAll();
   renderInspector();
   saveWorkflow();
@@ -912,6 +1069,7 @@ function addNode(type, x, y) {
   const node = createNode(type, snap(x - NODE_W / 2), snap(y - 60));
   state.workflow.nodes.push(node);
   state.selectedNode = node.id;
+  state.selectedNodes = [node.id];
   state.selectedEdge = null;
   renderAll();
   renderInspector();
@@ -1009,13 +1167,15 @@ function startNodeDrag(event, node) {
   if (event.button !== 0) return;
   event.preventDefault();
   closeInspector();
+  const selected = state.selectedNodes.includes(node.id)
+    ? state.workflow.nodes.filter((item) => state.selectedNodes.includes(item.id))
+    : [node];
   interaction = {
     kind: 'node',
     node,
+    nodes: selected.map((item) => ({ node: item, startX: item.x, startY: item.y })),
     startX: event.clientX,
     startY: event.clientY,
-    originX: node.x,
-    originY: node.y,
     moved: false,
   };
   window.addEventListener('pointermove', onPointerMove);
@@ -1023,7 +1183,7 @@ function startNodeDrag(event, node) {
 }
 
 function startPan(event) {
-  if (event.button !== 0 && event.button !== 1) return;
+  if (event.button !== 1 && event.button !== 2) return;
   event.preventDefault();
   interaction = {
     kind: 'pan',
@@ -1035,6 +1195,56 @@ function startPan(event) {
   $('#viewport').classList.add('is-panning');
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
+}
+
+function startMarquee(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+  const base = additive ? [...state.selectedNodes] : [];
+  if (!additive) clearSelection();
+  const box = h('div', { class: 'marquee' });
+  $('#viewport').append(box);
+  interaction = {
+    kind: 'marquee',
+    startX: event.clientX,
+    startY: event.clientY,
+    base,
+    box,
+    moved: false,
+  };
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+}
+
+function updateMarquee(currentX, currentY) {
+  if (!interaction || interaction.kind !== 'marquee') return;
+  const viewport = $('#viewport').getBoundingClientRect();
+  const left = Math.min(interaction.startX, currentX) - viewport.left;
+  const top = Math.min(interaction.startY, currentY) - viewport.top;
+  const right = Math.max(interaction.startX, currentX) - viewport.left;
+  const bottom = Math.max(interaction.startY, currentY) - viewport.top;
+  const box = interaction.box;
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+  box.style.width = `${right - left}px`;
+  box.style.height = `${bottom - top}px`;
+
+  const ids = new Set(interaction.base);
+  for (const node of state.workflow.nodes) {
+    const x = viewport.left + state.view.x + node.x * state.view.z;
+    const y = viewport.top + state.view.y + node.y * state.view.z;
+    const width = NODE_W * state.view.z;
+    const height = nodeHeight(node.type) * state.view.z;
+    const hit = x <= viewport.left + right && x + width >= viewport.left + left
+      && y <= viewport.top + bottom && y + height >= viewport.top + top;
+    if (hit) ids.add(node.id);
+  }
+  state.selectedNodes = [...ids];
+  state.selectedNode = state.selectedNodes[0] || null;
+  state.selectedEdge = null;
+  syncSelection();
+  renderWires();
 }
 
 function startLink(event, node, pin, dir) {
@@ -1101,16 +1311,26 @@ function movePaletteGhost(x, y) {
 function onPointerMove(event) {
   if (!interaction) return;
 
+  if (interaction.kind === 'marquee') {
+    if (!interaction.moved && Math.hypot(event.clientX - interaction.startX, event.clientY - interaction.startY) < 3) return;
+    interaction.moved = true;
+    updateMarquee(event.clientX, event.clientY);
+    return;
+  }
+
   if (interaction.kind === 'node') {
     if (!interaction.moved && Math.hypot(event.clientX - interaction.startX, event.clientY - interaction.startY) < 3) return;
     interaction.moved = true;
-    const node = interaction.node;
-    node.x = interaction.originX + (event.clientX - interaction.startX) / state.view.z;
-    node.y = interaction.originY + (event.clientY - interaction.startY) / state.view.z;
-    const el = $(`.node[data-id="${node.id}"]`);
-    if (el) {
-      el.style.left = `${node.x}px`;
-      el.style.top = `${node.y}px`;
+    const dx = (event.clientX - interaction.startX) / state.view.z;
+    const dy = (event.clientY - interaction.startY) / state.view.z;
+    for (const item of interaction.nodes) {
+      item.node.x = item.startX + dx;
+      item.node.y = item.startY + dy;
+      const el = $(`.node[data-id="${item.node.id}"]`);
+      if (el) {
+        el.style.left = `${item.node.x}px`;
+        el.style.top = `${item.node.y}px`;
+      }
     }
     renderWires();
     return;
@@ -1145,14 +1365,28 @@ function onPointerUp(event) {
   window.removeEventListener('pointerup', onPointerUp);
   $('#viewport').classList.remove('is-panning');
 
+  if (current.kind === 'marquee') {
+    current.box.remove();
+    if (!current.moved) {
+      state.selectedNodes = current.base;
+      state.selectedNode = current.base[0] || null;
+      syncSelection();
+      renderWires();
+    }
+    renderInspector();
+    return;
+  }
+
   if (current.kind === 'node') {
     if (current.moved) {
-      current.node.x = snap(current.node.x);
-      current.node.y = snap(current.node.y);
-      const el = $(`.node[data-id="${current.node.id}"]`);
-      if (el) {
-        el.style.left = `${current.node.x}px`;
-        el.style.top = `${current.node.y}px`;
+      for (const item of current.nodes) {
+        item.node.x = snap(item.node.x);
+        item.node.y = snap(item.node.y);
+        const el = $(`.node[data-id="${item.node.id}"]`);
+        if (el) {
+          el.style.left = `${item.node.x}px`;
+          el.style.top = `${item.node.y}px`;
+        }
       }
       renderWires();
       saveWorkflow();
@@ -1203,10 +1437,40 @@ function onPointerUp(event) {
 /* ------------------------------------------------------------------ */
 
 function validate() {
-  if (!state.workflow.nodes.length) return 'Перетащите узлы на холст или выберите пресет';
-  if (!state.workflow.nodes.some((n) => n.type.startsWith('trigger.'))) return 'Добавьте узел запуска';
-  if (!state.workflow.nodes.some((n) => n.type === 'source.repo')) return 'Добавьте узел «Репозиторий»';
-  if (!state.workflow.nodes.some((n) => n.type.startsWith('scan.'))) return 'Добавьте хотя бы одну проверку';
+  const nodes = state.workflow.nodes;
+  if (!nodes.length) return 'Перетащите узлы на холст или выберите пресет';
+  const triggers = nodes.filter((n) => n.type.startsWith('trigger.'));
+  if (!triggers.length) return 'Добавьте узел запуска';
+  const sources = nodes.filter((n) => n.type === 'source.repo');
+  if (!sources.length) return 'Добавьте узел «Репозиторий»';
+  const scans = nodes.filter((n) => n.type.startsWith('scan.'));
+  if (!scans.length) return 'Добавьте хотя бы одну проверку';
+
+  const outgoing = new Map(nodes.map((n) => [n.id, []]));
+  for (const edge of state.workflow.edges) {
+    if (!['out', 'true', 'false', 'pass', 'fail'].includes(edge.from.port) || edge.to.port !== 'in') continue;
+    (outgoing.get(edge.from.node) || []).push(edge.to.node);
+  }
+  const reachable = (starts) => {
+    const seen = new Set();
+    const queue = [...starts];
+    while (queue.length) {
+      const id = queue.shift();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const next of outgoing.get(id) || []) queue.push(next);
+    }
+    return seen;
+  };
+
+  const fromTrigger = reachable(triggers.map((n) => n.id));
+  if (!sources.some((source) => fromTrigger.has(source.id))) {
+    return 'Источник «Репозиторий» не соединён с запуском. Соедините запуск → репозиторий.';
+  }
+  const fromSource = reachable(sources.map((src) => src.id));
+  if (!scans.some((scan) => fromSource.has(scan.id))) {
+    return 'Проверки не соединены с источником. Соедините «Репозиторий» → проверка.';
+  }
   return null;
 }
 
@@ -1536,13 +1800,13 @@ function closeModal() {
 
 function exportJson() {
   if (!state.run) return toast('Сначала запустите сценарий', 'warn');
-  download('sakura-findings.json', JSON.stringify(toOutputJson(state.run.findings), null, 2), 'application/json');
+  download('ldwarden-findings.json', JSON.stringify(toOutputJson(state.run.findings), null, 2), 'application/json');
   toast('JSON выгружен', 'ok');
 }
 
 function exportMarkdown() {
   if (!state.run) return toast('Сначала запустите сценарий', 'warn');
-  download('sakura-report.md', toMarkdown(state.run.findings, { target: state.run.target }), 'text/markdown');
+  download('ldwarden-report.md', toMarkdown(state.run.findings, { target: state.run.target }), 'text/markdown');
   toast('Отчёт выгружен', 'ok');
 }
 
@@ -1575,11 +1839,17 @@ function bindEvents() {
   $('#fitView').addEventListener('click', fitView);
 
   $('#viewport').addEventListener('pointerdown', (event) => {
+    if (event.button === 2 || event.button === 1) {
+      event.preventDefault();
+      startPan(event);
+      return;
+    }
+    if (event.button !== 0) return;
     if (event.target.closest('.node') || event.target.closest('.pin')) return;
     if (event.target.closest('.wire')) return;
-    clearSelection();
-    startPan(event);
+    startMarquee(event);
   });
+  $('#viewport').addEventListener('contextmenu', (event) => event.preventDefault());
 
   $('#viewport').addEventListener('wheel', (event) => {
     event.preventDefault();
@@ -1602,9 +1872,9 @@ function bindEvents() {
       return;
     }
     if (!typing && (event.key === 'Delete' || event.key === 'Backspace')) {
-      if (state.selectedNode) {
+      if (state.selectedNodes.length) {
         event.preventDefault();
-        deleteNode(state.selectedNode);
+        deleteSelectedNodes();
       } else if (state.selectedEdge) {
         event.preventDefault();
         deleteEdge(state.selectedEdge);

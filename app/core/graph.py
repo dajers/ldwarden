@@ -256,6 +256,17 @@ def validate_graph(graph: Any) -> dict:
     unreachable = sorted(set(by_id) - reachable)
     if triggers and unreachable:
         warnings.append("Недостижимые от триггера ноды: " + ", ".join(unreachable))
+    source_ids = [
+        node["id"]
+        for node in nodes
+        if get_spec(str(node.get("type") or "")) is not None
+        and get_spec(str(node.get("type") or "")).category == "source"
+    ]
+    unreachable_sources = [node_id for node_id in source_ids if node_id not in reachable]
+    if triggers and unreachable_sources:
+        errors.append(
+            "Источник не соединён с триггером: " + ", ".join(unreachable_sources)
+        )
 
     stats = {
         "nodes": len(nodes),

@@ -71,6 +71,8 @@ class ScannerNode(BaseNode):
         ]
 
     def _run(self, ctx, params: dict, analyzer, node_type: str, filter_fn=None) -> NodeResult:
+        if not params.get("path") and not params.get("source_id"):
+            ctx.require_source()
         tree = ctx.source_view(
             path=params.get("path") or None,
             source_id=params.get("source_id") or None,

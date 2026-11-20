@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import fnmatch
 import os
 import shutil
@@ -398,7 +399,12 @@ class SourceService:
                 root = self._strip_single_root(root)
             label = meta.get("name") or source_id
         elif kind == "git":
-            root = self._clone_git(str(target.get("url") or ""), str(target.get("ref") or ""))
+            root = self._clone_git(
+                str(target.get("url") or ""),
+                str(target.get("ref") or ""),
+                token=str(target.get("token") or "") or None,
+                username=str(target.get("username") or "") or None,
+            )
             label = root.name
         else:
             raise ValueError(f"Неизвестный тип источника: {kind}")
@@ -518,7 +524,13 @@ class SourceService:
         self._meta_path(source_id).unlink(missing_ok=True)
 
 
-    def _clone_git(self, url: str, ref: str) -> Path:
+    def _clone_git(
+        self,
+        url: str,
+        ref: str,
+        token: str | None = None,
+        username: str | None = None,
+    ) -> Path:
         if not url:
             raise ValueError("Не указан URL репозитория")
         parsed = urlparse(url)
@@ -544,6 +556,16 @@ class SourceService:
             cmd += ["--branch", ref]
         cmd += [url, str(dest)]
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        credentials = ""
+        git_token = token or self.settings.git_token
+        git_username = username or self.settings.git_username or "x-access-token"
+        if git_token:
+            credentials = base64.b64encode(
+                f"{git_username}:{git_token}".encode()
+            ).decode()
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
+            env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {credentials}"
         try:
             proc = subprocess.run(
                 cmd,
@@ -554,7 +576,12 @@ class SourceService:
                 env=env,
             )
             if proc.returncode != 0:
-                raise RuntimeError(f"git clone завершился с ошибкой: {proc.stderr[-500:]}")
+                stderr = proc.stderr[-500:]
+                if git_token:
+                    stderr = stderr.replace(git_token, "***")
+                if credentials:
+                    stderr = stderr.replace(credentials, "***")
+                raise RuntimeError(f"git clone завершился с ошибкой: {stderr}")
             shutil.rmtree(dest / ".git", ignore_errors=True)
             meta = {
                 "id": source_id,

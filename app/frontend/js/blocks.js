@@ -5,11 +5,11 @@
  */
 
 export const CATEGORIES = {
-  trigger: { label: 'Запуск', color: 'var(--cat-trigger)', tint: '#faf6fd' },
-  source: { label: 'Источник', color: 'var(--cat-source)', tint: '#f6f8fd' },
-  scan: { label: 'Проверки', color: 'var(--cat-scan)', tint: '#fdf5f7' },
-  logic: { label: 'Логика', color: 'var(--cat-logic)', tint: '#fdfaf4' },
-  action: { label: 'Действия', color: 'var(--cat-action)', tint: '#f6faf5' },
+  trigger: { label: 'Запуск', color: 'var(--cat-trigger)', tint: 'var(--cat-trigger-tint)' },
+  source: { label: 'Источник', color: 'var(--cat-source)', tint: 'var(--cat-source-tint)' },
+  scan: { label: 'Проверки', color: 'var(--cat-scan)', tint: 'var(--cat-scan-tint)' },
+  logic: { label: 'Логика', color: 'var(--cat-logic)', tint: 'var(--cat-logic-tint)' },
+  action: { label: 'Действия', color: 'var(--cat-action)', tint: 'var(--cat-action-tint)' },
 };
 
 export const CATEGORY_ORDER = ['trigger', 'source', 'scan', 'logic', 'action'];
@@ -17,7 +17,7 @@ export const CATEGORY_ORDER = ['trigger', 'source', 'scan', 'logic', 'action'];
 export const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 export const SEVERITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
 export const SEVERITY_LABEL = { CRITICAL: 'Критично', HIGH: 'Высоко', MEDIUM: 'Средне', LOW: 'Низко' };
-export const SEVERITY_COLOR = { CRITICAL: 'var(--crit)', HIGH: 'var(--bad)', MEDIUM: 'var(--warn)', LOW: '#6e8fa8' };
+export const SEVERITY_COLOR = { CRITICAL: 'var(--crit)', HIGH: 'var(--bad)', MEDIUM: 'var(--warn)', LOW: 'var(--low)' };
 
 /* ---------- геометрия ---------- */
 
@@ -50,8 +50,6 @@ export function portIndex(type, portId, dir) {
 
 /* ---------- описания узлов ---------- */
 
-const CONDITION_FIELDS = { total: 'находок', critical: 'критичных', secret: 'секретов' };
-
 export const NODE_TYPES = {
   'trigger.manual': {
     cat: 'trigger',
@@ -69,7 +67,10 @@ export const NODE_TYPES = {
     sub: () => 'внешний HTTP-запуск',
     inputs: [],
     outputs: [{ id: 'out', kind: 'exec', label: 'Запуск' }],
-    params: [],
+    params: [
+      { key: 'secret', label: 'HMAC-секрет', type: 'secret', def: '', hint: 'Проверяется по заголовку X-LDWarden-Signature. Шифруется на сервере.' },
+      { key: 'description', label: 'Описание', type: 'text', def: '' },
+    ],
   },
   'trigger.schedule': {
     cat: 'trigger',
@@ -101,6 +102,8 @@ export const NODE_TYPES = {
     params: [
       { key: 'target', label: 'Путь или ссылка', type: 'text', def: 'training-project' },
       { key: 'branch', label: 'Ветка', type: 'text', def: 'main' },
+      { key: 'gitToken', label: 'Git-токен', type: 'secret', def: '', hint: 'Для приватного репозитория. Шифруется на сервере; в браузере не сохраняется.' },
+      { key: 'gitUsername', label: 'Git-пользователь', type: 'text', def: 'x-access-token', hint: 'GitHub: x-access-token, GitLab: oauth2.' },
     ],
   },
   'scan.secret': {
@@ -145,17 +148,31 @@ export const NODE_TYPES = {
   'logic.branch': {
     cat: 'logic',
     icon: 'branch',
-    title: 'Ветвление',
-    sub: (p) => `${CONDITION_FIELDS[p.field] || p.field} ${p.op} ${p.value}`,
+    title: 'Условие',
+    sub: (p) => `${p.field} ${p.operator} ${p.value}`,
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
       { id: 'true', kind: 'exec', label: 'Да' },
       { id: 'false', kind: 'exec', label: 'Нет' },
     ],
     params: [
-      { key: 'field', label: 'Что проверяем', type: 'select', options: ['total', 'critical', 'secret'], def: 'critical', labels: CONDITION_FIELDS },
-      { key: 'op', label: 'Условие', type: 'select', options: ['>=', '==', '<=', '>'], def: '>=' },
-      { key: 'value', label: 'Значение', type: 'number', def: 1 },
+      {
+        key: 'field',
+        label: 'Поле',
+        type: 'text',
+        def: 'findings.CRITICAL',
+        hint: 'Например: findings.total, findings.CRITICAL, findings.by_category.SECRET, gate.passed, ai.overall_risk.',
+      },
+      {
+        key: 'operator',
+        label: 'Оператор',
+        type: 'select',
+        options: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'regex', 'truthy', 'empty'],
+        def: 'gte',
+        labels: { eq: 'равно', ne: 'не равно', gt: 'больше', gte: 'больше или равно', lt: 'меньше', lte: 'меньше или равно', contains: 'содержит', regex: 'регулярное выражение', truthy: 'непустое/истина', empty: 'пустое' },
+      },
+      { key: 'value', label: 'Значение', type: 'text', def: '1', hint: 'Для regex — шаблон; для contains — подстрока; для truthy/empty можно оставить пустым.' },
+      { key: 'caseSensitive', label: 'Учитывать регистр', type: 'toggle', def: false },
     ],
   },
   'control.gate': {
@@ -188,6 +205,14 @@ export const NODE_TYPES = {
     ],
     params: [
       {
+        key: 'provider',
+        label: 'Провайдер',
+        type: 'select',
+        options: ['auto', 'local', 'openai', 'none'],
+        def: 'auto',
+        labels: { auto: 'auto (из настроек)', local: 'локальная GGUF', openai: 'OpenAI-совместимый', none: 'без LLM' },
+      },
+      {
         key: 'model',
         label: 'Модель',
         type: 'select',
@@ -195,6 +220,9 @@ export const NODE_TYPES = {
         def: 'Qwen2.5-Coder 7B · локально',
       },
       { key: 'tone', label: 'Тон объяснения', type: 'select', options: ['Для разработчика', 'Для менеджера'], def: 'Для разработчика' },
+      { key: 'maxFindings', label: 'Находок в LLM', type: 'number', def: 12, hint: 'Остальные получат детерминированное объяснение.' },
+      { key: 'threads', label: 'Потоков CPU', type: 'number', def: 4, hint: 'Для локальной модели: меньше — тише, но медленнее.' },
+      { key: 'timeout', label: 'Таймаут, сек', type: 'number', def: 45, hint: 'После таймаута — fallback без зависания.' },
     ],
   },
   'notify.send': {
@@ -210,6 +238,7 @@ export const NODE_TYPES = {
     params: [
       { key: 'channel', label: 'Канал', type: 'select', options: ['Telegram', 'HTTP webhook', 'E-mail'], def: 'Telegram' },
       { key: 'token', label: 'Токен / URL / пароль', type: 'secret', def: '', hint: 'Шифруется на бэкенде и маскируется в интерфейсе.' },
+      { key: 'hmacSecret', label: 'HMAC-секрет webhook', type: 'secret', def: '', hint: 'Подпись X-LDWarden-Signature; шифруется на сервере.' },
       { key: 'chatId', label: 'Chat ID / адрес', type: 'text', def: '', hint: 'Для Telegram можно оставить пустым — возьмётся из .env или подключения.' },
       { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
       { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },

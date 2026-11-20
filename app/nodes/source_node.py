@@ -47,6 +47,21 @@ class SourceTargetNode(BaseNode):
             "Через запятую, например **/test/**",
             default="",
         ),
+        ParamSpec(
+            "git_token",
+            "secret",
+            "Git-токен",
+            "Для приватных репозиториев. Шифруется в БД.",
+            default="",
+            secret=True,
+        ),
+        ParamSpec(
+            "git_username",
+            "string",
+            "Git-пользователь",
+            "GitHub: x-access-token, GitLab: oauth2",
+            default="x-access-token",
+        ),
     ]
     tags = ["source"]
     docs = "Нода нужна, чтобы сценарий был переносимым: источник можно задать в ноде или при запуске."
@@ -59,7 +74,10 @@ class SourceTargetNode(BaseNode):
             source_id=params.get("source_id") or None,
             include=include or None,
             exclude=exclude or None,
+            git_token=params.get("git_token") or None,
+            git_username=params.get("git_username") or None,
         )
+        ctx.source_ready = True
         ctx.emit(
             "source.ready",
             f"Источник: {tree.label}, файлов: {len(tree.files)}",

@@ -200,18 +200,45 @@ function evaluate(params, findings) {
   const total = findings.length;
   const critical = findings.filter((f) => f.severity === 'CRITICAL').length;
   const secret = findings.filter((f) => f.category === 'SECRET').length;
-  const value = Number(params.value) || 0;
-  const field = { total, critical, secret }[params.field] ?? total;
-
-  switch (params.op) {
-    case '>=':
-      return field >= value;
-    case '==':
-      return field === value;
-    case '<=':
-      return field <= value;
-    case '>':
-      return field > value;
+  const fields = {
+    total,
+    critical,
+    secret,
+    'findings.total': total,
+    'findings.CRITICAL': critical,
+    'findings.by_category.SECRET': secret,
+  };
+  const actual = params.field in fields ? fields[params.field] : total;
+  const expected = params.value;
+  const operator = params.operator || params.op || 'gte';
+  const left = Number(actual);
+  const right = Number(expected);
+  const numeric = Number.isFinite(left) && Number.isFinite(right);
+  switch (operator) {
+    case 'eq':
+      return String(actual) === String(expected);
+    case 'ne':
+      return String(actual) !== String(expected);
+    case 'gt':
+      return numeric && left > right;
+    case 'gte':
+      return numeric && left >= right;
+    case 'lt':
+      return numeric && left < right;
+    case 'lte':
+      return numeric && left <= right;
+    case 'contains':
+      return String(actual).toLowerCase().includes(String(expected).toLowerCase());
+    case 'regex':
+      try {
+        return new RegExp(String(expected), params.caseSensitive ? '' : 'i').test(String(actual));
+      } catch {
+        return false;
+      }
+    case 'truthy':
+      return Boolean(actual);
+    case 'empty':
+      return !actual;
     default:
       return false;
   }

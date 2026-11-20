@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.ai.prompts import SYSTEM_PROMPT, build_analysis_request, build_repair_r
 from app.ai.providers import (
     FakeProvider,
     LLMProvider,
+    ProviderStopped,
     ProviderUnavailable,
     build_provider,
 )
@@ -49,12 +51,24 @@ class AIService:
         self.provider = provider or build_provider(settings)
 
 
-    def analyze(self, findings: list[Finding], meta: dict | None = None) -> dict:
+    def analyze(
+        self,
+        findings: list[Finding],
+        meta: dict | None = None,
+        cancel_event=None,
+        timeout: int | float | None = None,
+    ) -> dict:
         meta = meta or {}
         if not findings:
             return self._empty_result()
         ordered = sorted(findings, key=lambda f: (-f.severity_rank, f.path, f.line))
         selected = ordered[: max(1, self.settings.llm_max_findings)]
+        deadline = time.monotonic() + float(timeout) if timeout else None
+        if cancel_event is not None and cancel_event.is_set():
+            result = self._fallback(findings, selected, meta)
+            result["validation"]["cancelled"] = True
+            result["validation"]["stopped_reason"] = "cancelled"
+            return result
         payload_findings = [_finding_payload(finding) for finding in selected]
         request = build_analysis_request(payload_findings, meta)
         messages = [
@@ -70,8 +84,12 @@ class AIService:
                 messages,
                 response_format={"type": "json_object"},
                 temperature=self.settings.llm_temperature,
-                max_tokens=2048,
+                max_tokens=1536,
+                cancel_event=cancel_event,
+                deadline=deadline,
             )
+        except ProviderStopped as exc:
+            errors.append(f"AI остановлен: {exc.reason}")
         except ProviderUnavailable as exc:
             errors.append(str(exc))
         except Exception as exc:
@@ -85,7 +103,12 @@ class AIService:
                 schema_ok = self._schema_ok(parsed)
             if parsed is None or not schema_ok:
                 repair_error = self._schema_error(parsed) if parsed is not None else "ответ не является JSON"
+                if cancel_event is not None and cancel_event.is_set():
+                    errors.append("AI остановлен: cancelled")
+                    parsed = None
                 try:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise ProviderStopped("cancelled")
                     repaired = self.provider.complete(
                         [
                             {"role": "system", "content": SYSTEM_PROMPT},
@@ -93,7 +116,9 @@ class AIService:
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.0,
-                        max_tokens=2048,
+                        max_tokens=1536,
+                        cancel_event=cancel_event,
+                        deadline=deadline,
                     )
                     candidate = self._parse_json(repaired)
                     if candidate is not None and self._schema_ok(candidate):
@@ -110,6 +135,16 @@ class AIService:
             result["validation"]["errors"] = errors + (result["validation"].get("errors") or [])
             result["validation"]["attempted_provider"] = attempted_provider
             result["validation"]["attempted_model"] = attempted_model
+            result["validation"]["cancelled"] = bool(
+                cancel_event is not None and cancel_event.is_set()
+            )
+            if result["validation"]["cancelled"]:
+                result["validation"]["stopped_reason"] = "cancelled"
+            else:
+                for reason in ("timeout", "cancelled"):
+                    if any(reason in error for error in errors):
+                        result["validation"]["stopped_reason"] = reason
+                        break
             return result
 
         grounded, validation = self._ground(parsed, findings, selected)
@@ -146,6 +181,7 @@ class AIService:
 
 
     def generate_workflow(self, prompt: str, source_hint: str = "") -> dict:
+        import app.nodes  # noqa: F401  (ensure the node registry is populated)
         from app.ai.planner import heuristic_workflow
 
         request = build_workflow_request(prompt, catalog(), source_hint=source_hint)
@@ -165,7 +201,8 @@ class AIService:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.1,
-                max_tokens=2048,
+                max_tokens=1536,
+                deadline=time.monotonic() + min(45, int(self.settings.llm_timeout or 45)),
             )
         except Exception as exc:
             warnings.append(f"LLM недоступна, использован эвристический планировщик: {exc}")
