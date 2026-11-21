@@ -102,6 +102,24 @@ def targets():
     )
 
 
+@bp.get("/targets/check")
+def check_target():
+    raw = str(request.args.get("path") or "").strip()
+    if not raw:
+        raise ApiError("Укажите путь к папке или файлу", 400, "invalid_target")
+    try:
+        resolved = settings().resolve_allowed_path(raw)
+    except (OSError, ValueError) as exc:
+        return jsonify({"ok": False, "path": raw, "error": str(exc)})
+    if resolved.is_file():
+        return jsonify({"ok": True, "path": str(resolved), "is_dir": False, "entries": 1, "error": ""})
+    try:
+        entries = sum(1 for _ in resolved.iterdir())
+    except OSError as exc:
+        return jsonify({"ok": False, "path": str(resolved), "error": str(exc)})
+    return jsonify({"ok": True, "path": str(resolved), "is_dir": True, "entries": entries, "error": ""})
+
+
 @bp.get("/nodes")
 def nodes():
     category = request.args.get("category")

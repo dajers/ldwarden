@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Шоколадный стикер: плитка в красной обёртке">
+  <defs>
+    <filter id="chocoShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3.5" flood-color="#000000" flood-opacity="0.16"/>
+    </filter>
+    <linearGradient id="barFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7a4b2a"/>
+      <stop offset="1" stop-color="#5c3719"/>
+    </linearGradient>
+    <linearGradient id="wrapFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9413a"/>
+      <stop offset="1" stop-color="#a3302a"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(-22 120 120)" filter="url(#chocoShadow)">
+    <!-- die-cut белая основа -->
+    <rect x="28" y="20" width="186" height="196" rx="18" fill="#ffffff"/>
+
+    <!-- шоколадная плитка -->
+    <rect x="42" y="34" width="140" height="108" rx="9" fill="url(#barFill)"/>
+    <g stroke="#482a15" stroke-width="3" stroke-linecap="round" opacity="0.9">
+      <path d="M 77 36 V 140"/>
+      <path d="M 112 36 V 140"/>
+      <path d="M 147 36 V 140"/>
+      <path d="M 44 88 H 180"/>
+    </g>
+    <g fill="#8a5a34" opacity="0.45">
+      <rect x="46" y="38" width="27" height="46" rx="4"/>
+      <rect x="116" y="38" width="27" height="46" rx="4"/>
+    </g>
+
+    <!-- обёртка -->
+    <rect x="104" y="92" width="128" height="118" rx="10" fill="url(#wrapFill)"/>
+    <path d="M 104 112 H 232" stroke="#8f2a24" stroke-width="3" opacity="0.7"/>
+
+    <!-- фольга между плиткой и обёрткой -->
+    <path d="M 96 88 C 116 98 132 82 152 90 C 172 98 188 84 208 92 C 222 98 232 90 240 92 L 240 104 C 222 110 206 100 188 106 C 168 112 150 102 130 108 C 112 114 100 106 96 104 Z" fill="#d6d6d6"/>
+    <path d="M 100 96 C 120 104 136 90 156 98 C 176 106 192 92 212 100 C 224 105 232 99 238 100" stroke="#a5a5a5" stroke-width="2.5" fill="none" opacity="0.9"/>
+    <path d="M 102 102 C 122 110 138 98 158 104 C 178 110 194 100 214 106" stroke="#bdbdbd" stroke-width="2" fill="none"/>
+
+    <!-- блик на обёртке -->
+    <path d="M 118 120 L 150 96 L 166 96 L 130 126 Z" fill="#ffffff" opacity="0.10"/>
+  </g>
+</svg>

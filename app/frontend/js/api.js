@@ -140,15 +140,33 @@ async function request(path, options = {}) {
   return data;
 }
 
+function normalizeTargetPath(value) {
+  let text = String(value || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  text = text.replace(/\/{2,}/g, '/');
+  for (let index = 1; index < text.length - 1; index += 1) {
+    if (text[index] !== '/') continue;
+    const left = text.slice(0, index);
+    const right = text.slice(index + 1);
+    if (left === right || left === '/' + right || left.slice(1) === right) {
+      text = left;
+      break;
+    }
+  }
+  if (text.length > 1) text = text.replace(/\/+$/, '');
+  return text;
+}
+
 function normalizeTarget(value) {
-  const target = String(value || '').trim();
+  const target = normalizeTargetPath(value);
   if (!target || target === 'training-project' || target === 'training-main/training-project') return '';
   return target;
 }
 
 function targetPayload(workflow) {
   const source = (workflow.nodes || []).find((node) => node.type === 'source.repo');
-  const raw = String((source && source.params && source.params.target) || '').trim();
+  const raw = normalizeTargetPath(String((source && source.params && source.params.target) || '').trim());
   if (!raw || raw === 'training-project' || raw === 'training-main/training-project') return null;
   if (/^https?:\/\//i.test(raw)) {
     const ref = String((source && source.params && source.params.branch) || '').trim();

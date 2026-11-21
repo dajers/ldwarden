@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -129,18 +130,41 @@ class Settings:
         for path in (self.data_dir, self.sources_dir, self.tmp_dir):
             path.mkdir(parents=True, exist_ok=True)
 
+    def _repair_path(self, raw: str) -> Path | None:
+        """Починить типичные опечатки в пути: двойные слэши и путь, вставленный дважды."""
+        collapsed = re.sub(r"/{2,}", "/", raw)
+        candidates = [collapsed]
+        for index in range(1, len(collapsed) - 1):
+            if collapsed[index] != "/":
+                continue
+            left, right = collapsed[:index], collapsed[index + 1:]
+            if left == right or left == "/" + right or left[1:] == right:
+                candidates.append(left)
+                break
+        for candidate in candidates:
+            path = Path(candidate).expanduser()
+            if not path.is_absolute():
+                continue
+            if path.exists():
+                return path.resolve()
+        return None
+
     def resolve_allowed_path(self, value: str | Path) -> Path:
         """Resolve a user supplied path.
 
         Сканировать можно любую существующую папку или файл — ограничения
         allowed_roots больше не применяются (локальный инструмент).
         """
-        path = Path(value).expanduser()
+        raw = str(value).strip()
+        path = Path(raw).expanduser()
         if not path.is_absolute():
             path = self.base_dir / path
         resolved = path.resolve()
         if not resolved.exists():
-            raise FileNotFoundError(f"Источник не найден: {resolved}")
+            repaired = self._repair_path(raw)
+            if repaired is None:
+                raise FileNotFoundError(f"Источник не найден: {resolved}")
+            resolved = repaired
         return resolved
 
     def is_allowed_path(self, value: str | Path) -> bool:

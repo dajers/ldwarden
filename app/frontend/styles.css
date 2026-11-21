@@ -265,6 +265,70 @@ html[data-theme="hawaii"] {
   --shadow-lg: 0 26px 70px rgba(60, 50, 35, 0.18);
 }
 
+/* ---------- тема: шоколад ---------- */
+html[data-theme="chocolate"] {
+  --bg: #f3e7d6;
+  --bg-glow-1: #f7e3cf;
+  --bg-glow-2: #efe3cf;
+  --topbar: rgba(255, 250, 242, 0.85);
+
+  --panel: #fffaf1;
+  --surface: #fffaf2;
+  --surface-2: #faf0e2;
+  --surface-3: #f7ecdc;
+
+  --canvas: #f2e6d3;
+  --canvas-dot: #dcc7ab;
+
+  --line: #e6d5bd;
+  --line-strong: #cfb593;
+
+  --ink: #3a2a1d;
+  --ink-soft: #57412f;
+  --muted: #8a7360;
+  --muted-2: #b5a28c;
+
+  --rose: #a83a2f;
+  --rose-d: #8d2f26;
+  --rose-soft: #f7e4df;
+  --rose-ink: #6f2a22;
+  --accent: var(--rose);
+  --accent-grad: linear-gradient(135deg, #b8473a 0%, #a83a2f 55%, #8d2f26 100%);
+  --accent-shadow: rgba(168, 58, 47, 0.30);
+  --accent-shadow-hover: rgba(168, 58, 47, 0.40);
+  --accent-text: #fff7ec;
+
+  --ok: #6f8f5e;
+  --warn: #c0923f;
+  --bad: #b04a3a;
+  --crit: #8f2f26;
+  --low: #7f95a5;
+
+  --cat-trigger: #b08a5c;
+  --cat-source: #9a7048;
+  --cat-scan: #a83a2f;
+  --cat-logic: #c0a05a;
+  --cat-action: #7d8a5f;
+  --cat-trigger-tint: #faf3e8;
+  --cat-source-tint: #f8f0e5;
+  --cat-scan-tint: #f9e9e4;
+  --cat-logic-tint: #faf4e2;
+  --cat-action-tint: #f3f5e9;
+
+  --wire-exec: #a8703f;
+  --wire-data: #7d8a5f;
+
+  --code-bg: #2e2117;
+  --code-ink: #f4e8d6;
+  --backdrop: rgba(58, 42, 29, 0.28);
+  --petal: #e3c9a6;
+  --petals-visible: none;
+
+  --shadow-sm: 0 2px 10px rgba(74, 44, 23, 0.07);
+  --shadow: 0 12px 34px rgba(74, 44, 23, 0.12);
+  --shadow-lg: 0 26px 70px rgba(58, 34, 16, 0.20);
+}
+
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
@@ -846,6 +910,9 @@ select.select option { background: var(--surface); color: var(--ink); }
 .input--area { min-height: 54px; resize: vertical; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; }
 .expr-hint.is-error { color: var(--bad); }
 
+.target-check.is-ok { color: var(--ok); }
+.target-check.is-error { color: var(--bad); }
+
 .field__hint { font-size: 10.5px; color: var(--muted-2); margin-top: 5px; line-height: 1.4; }
 
 .inspector__foot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex: none; }
@@ -1093,4 +1160,141 @@ html[data-theme="hawaii"] #runBtn.is-poking .run-monkey { animation: monkey-poke
   56% { transform: translateY(-7px) rotate(3deg) scale(1.03); }
   74% { transform: translateY(0) rotate(-2deg) scale(1); }
   100% { transform: translateY(0) rotate(0) scale(1); }
+}
+
+/* ---------- шоколад: плитки и разлом кнопки ---------- */
+html[data-theme="chocolate"] .node {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(0, 0, 0, 0.10)),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.24) 0 2px, transparent 2px 25%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.24) 0 2px, transparent 2px 50%),
+    #6b4226;
+  border-color: #4a2c17;
+  color: #f8ecdc;
+}
+html[data-theme="chocolate"] .node__head {
+  background: color-mix(in srgb, var(--cat, #b08a5c) 24%, #5c3719);
+  border-bottom-color: rgba(0, 0, 0, 0.35);
+}
+html[data-theme="chocolate"] .node .node__title { color: #fdf1e0; }
+html[data-theme="chocolate"] .node .node__meta { color: rgba(250, 236, 219, 0.72); }
+html[data-theme="chocolate"] .node .pin__label { color: rgba(250, 236, 219, 0.72); }
+html[data-theme="chocolate"] .node .node__icon {
+  background: rgba(255, 246, 230, 0.14);
+  border-color: rgba(255, 240, 220, 0.24);
+  color: #ffe1b3;
+}
+html[data-theme="chocolate"] .node .node__chip {
+  background: rgba(255, 244, 226, 0.16);
+  border-color: rgba(255, 240, 220, 0.22);
+  color: #ffeed6;
+}
+html[data-theme="chocolate"] .node .node__state { background: rgba(255, 240, 220, 0.55); }
+html[data-theme="chocolate"] .node__remove {
+  background: rgba(40, 24, 12, 0.55);
+  border-color: rgba(255, 240, 220, 0.22);
+  color: #f0d9bd;
+}
+
+html[data-theme="chocolate"] .palette-item {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.10)),
+    #6b4226;
+  border-color: #4a2c17;
+}
+html[data-theme="chocolate"] .palette-item__icon {
+  background: rgba(255, 246, 230, 0.14);
+  border-color: rgba(255, 240, 220, 0.24);
+  color: #ffe1b3;
+}
+html[data-theme="chocolate"] .palette-item__title { color: #fdf1e0; }
+html[data-theme="chocolate"] .palette-item__sub { color: rgba(250, 236, 219, 0.65); }
+
+html[data-theme="chocolate"] #runBtn {
+  position: relative;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.26) 0 2px, transparent 2px 25%),
+    linear-gradient(180deg, #7a4a2a, #5a3418);
+  border-color: #452813;
+  color: #ffe9cf;
+  box-shadow: 0 8px 20px rgba(74, 44, 23, 0.35);
+}
+html[data-theme="chocolate"] #runBtn::before {
+  content: "";
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  z-index: 0;
+}
+html[data-theme="chocolate"] #runBtn > * { position: relative; z-index: 1; }
+html[data-theme="chocolate"] #runBtn:hover { box-shadow: 0 10px 26px rgba(74, 44, 23, 0.45); }
+html[data-theme="chocolate"] #runBtn kbd {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 240, 220, 0.20);
+  color: #ffe9cf;
+}
+html[data-theme="chocolate"] #runBtn.is-cracking {
+  background: #8d2f26;
+  overflow: visible;
+}
+html[data-theme="chocolate"] #runBtn.is-cracking::before { opacity: 0; }
+
+html[data-theme="chocolate"] .choco-piece { display: none; }
+html[data-theme="chocolate"] #runBtn.is-cracking .choco-piece {
+  display: block;
+  position: absolute;
+  width: 51%;
+  height: 51%;
+  background: linear-gradient(160deg, #7d4b29, #5a3418);
+  border: 1px solid #4a2c17;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  z-index: 3;
+  animation: choco-break 4s ease-in-out;
+}
+html[data-theme="chocolate"] .choco-piece--1 {
+  left: -1%;
+  top: -2%;
+  border-radius: 11px 4px 4px 4px;
+  --dx: -13px;
+  --dy: -3px;
+  --rot: -1.8deg;
+}
+html[data-theme="chocolate"] .choco-piece--2 {
+  right: -1%;
+  top: -2%;
+  border-radius: 4px 11px 4px 4px;
+  --dx: 13px;
+  --dy: -3px;
+  --rot: 1.8deg;
+}
+html[data-theme="chocolate"] .choco-piece--3 {
+  left: -1%;
+  bottom: -2%;
+  border-radius: 4px 4px 4px 11px;
+  --dx: -13px;
+  --dy: 3px;
+  --rot: 1.4deg;
+}
+html[data-theme="chocolate"] .choco-piece--4 {
+  right: -1%;
+  bottom: -2%;
+  border-radius: 4px 4px 11px 4px;
+  --dx: 13px;
+  --dy: 3px;
+  --rot: -1.4deg;
+}
+
+@keyframes choco-break {
+  0% { transform: none; }
+  12% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+  45% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+  100% { transform: none; }
 }

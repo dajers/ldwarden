@@ -132,7 +132,7 @@ const snap = (v, step = 10) => Math.round(v / step) * step;
 /* ------------------------------------------------------------------ */
 
 const THEME_KEY = 'sakura.theme';
-const THEMES = ['sakura', 'hawaii', 'mono', 'warden'];
+const THEMES = ['sakura', 'hawaii', 'chocolate', 'mono', 'warden'];
 let currentTheme = readTheme();
 
 function readTheme() {
@@ -158,7 +158,10 @@ function applyTheme(theme, { persist = true } = {}) {
   }
   for (const option of $$('.theme-option')) option.classList.toggle('is-active', option.dataset.theme === next);
   const triggerImage = $('#themeBtn img');
-  if (triggerImage) triggerImage.src = next === 'hawaii' ? 'assets/hawaii.svg' : 'assets/palm.jpg';
+  if (triggerImage) {
+    const stickers = { hawaii: 'assets/hawaii.svg', chocolate: 'assets/chocolate.svg' };
+    triggerImage.src = stickers[next] || 'assets/palm.jpg';
+  }
 }
 
 function initThemeSwitch() {
@@ -1013,6 +1016,7 @@ function renderInspector() {
 
   const body = h('div', { class: 'inspector__body' });
   for (const param of def.params) body.append(renderField(node, param));
+  if (node.type === 'source.repo') body.append(renderTargetCheck(node));
   if (node.type === 'logic.custom') body.append(h('p', { class: 'field__hint expr-hint', id: 'exprHint' }));
   body.append(renderNodeColor(node));
   if (api.isRemote && node.type === 'notify.send' && node.params.channel === 'Telegram') {
@@ -1097,6 +1101,15 @@ function renderField(node, param) {
       spellcheck: 'false',
     });
     input.addEventListener('input', () => setParam(node, param.key, param.type === 'number' ? Number(input.value) : input.value));
+    if (node.type === 'source.repo' && param.key === 'target') {
+      input.addEventListener('change', () => {
+        const normalized = normalizeTargetInput(input.value);
+        if (normalized !== input.value) {
+          input.value = normalized;
+          setParam(node, 'target', normalized);
+        }
+      });
+    }
     wrap.append(input);
   }
 
@@ -1168,6 +1181,60 @@ function updateExprHint(node) {
   } else {
     hint.textContent = 'Синтаксис в порядке — условие проверится при запуске';
   }
+}
+
+function normalizeTargetInput(value) {
+  let text = String(value || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  text = text.replace(/\/{2,}/g, '/');
+  for (let index = 1; index < text.length - 1; index += 1) {
+    if (text[index] !== '/') continue;
+    const left = text.slice(0, index);
+    const right = text.slice(index + 1);
+    if (left === right || left === '/' + right || left.slice(1) === right) {
+      text = left;
+      break;
+    }
+  }
+  if (text.length > 1) text = text.replace(/\/+$/, '');
+  return text;
+}
+
+function renderTargetCheck(node) {
+  const wrap = h('div', { class: 'field field--check' });
+  const button = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Проверить путь' });
+  const hint = h('p', { class: 'field__hint target-check', text: '' });
+  button.addEventListener('click', async () => {
+    const value = String(node.params.target || '').trim();
+    hint.classList.remove('is-error', 'is-ok');
+    if (!value) {
+      hint.textContent = 'Укажите путь к папке';
+      hint.classList.add('is-error');
+      return;
+    }
+    if (!api.isRemote) {
+      hint.textContent = 'Проверка пути доступна с запущенным сервером';
+      return;
+    }
+    hint.textContent = 'Проверяю…';
+    try {
+      const response = await fetch(`/api/targets/check?path=${encodeURIComponent(value)}`);
+      const data = await response.json();
+      if (data.ok) {
+        hint.textContent = data.is_dir ? `✓ Папка найдена · элементов: ${data.entries}` : '✓ Файл найден';
+        hint.classList.add('is-ok');
+      } else {
+        hint.textContent = `✗ ${data.error || 'Путь не найден'}`;
+        hint.classList.add('is-error');
+      }
+    } catch (error) {
+      hint.textContent = '✗ Не удалось проверить путь';
+      hint.classList.add('is-error');
+    }
+  });
+  wrap.append(button, hint);
+  return wrap;
 }
 
 function setParam(node, key, value) {
@@ -1656,6 +1723,15 @@ function playMonkeyPoke() {
   setTimeout(() => button.classList.remove('is-poking'), 950);
 }
 
+function playChocoBreak() {
+  const button = $('#runBtn');
+  if (!button || document.documentElement.dataset.theme !== 'chocolate') return;
+  button.classList.remove('is-cracking');
+  void button.offsetWidth;
+  button.classList.add('is-cracking');
+  setTimeout(() => button.classList.remove('is-cracking'), 4000);
+}
+
 async function startRun() {
   if (state.running) {
     if (state.token) {
@@ -1680,6 +1756,7 @@ async function startRun() {
   setRunning(true);
   setStatus('Выполняется…', 'run');
   playMonkeyPoke();
+  playChocoBreak();
 
   try {
     await api.run(state.workflow, { onEvent }, state.token);

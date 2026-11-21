@@ -9,10 +9,10 @@
     // тема ставится до первой отрисовки, чтобы не было вспышки
     try {
       var saved = localStorage.getItem('sakura.theme');
-      if (saved === 'mono' || saved === 'warden' || saved === 'hawaii') document.documentElement.dataset.theme = saved;
+      if (['mono', 'warden', 'hawaii', 'chocolate'].includes(saved)) document.documentElement.dataset.theme = saved;
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20261121" />
 </head>
 <body>
 
@@ -90,6 +90,10 @@
             <img src="assets/hawaii.svg" alt="" /><span>Гавайи</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
           </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="chocolate">
+            <img src="assets/chocolate.svg" alt="" /><span>Шоколад</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
           <button class="theme-option" type="button" role="menuitem" data-theme="mono">
             <img src="assets/yin-yang.webp" alt="" /><span>Черно-белый</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
@@ -108,6 +112,10 @@
         <span id="runLabel">Запустить</span>
         <kbd>⌘↵</kbd>
         <span class="run-monkey" aria-hidden="true"></span>
+        <span class="choco-piece choco-piece--1" aria-hidden="true"></span>
+        <span class="choco-piece choco-piece--2" aria-hidden="true"></span>
+        <span class="choco-piece choco-piece--3" aria-hidden="true"></span>
+        <span class="choco-piece choco-piece--4" aria-hidden="true"></span>
       </button>
     </div>
   </header>
@@ -249,6 +257,6 @@
       });
     }
   </script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=20261121"></script>
 </body>
 </html>
