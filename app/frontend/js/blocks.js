@@ -84,17 +84,54 @@ export const NODE_TYPES = {
     cat: 'trigger',
     icon: 'clock',
     title: 'По расписанию',
-    sub: (p) => p.cron,
+    sub: (p) => {
+      if (p.mode === 'once') return `${p.runDate || 'дата не выбрана'} ${p.runTime || ''}`.trim();
+      const days = { '*': 'каждый день', '1': 'пн', '2': 'вт', '3': 'ср', '4': 'чт', '5': 'пт', '6': 'сб', '7': 'вс' };
+      const day = days[p.weekday] || 'день недели';
+      return `${day} ${p.runTime || ''}`.trim();
+    },
     inputs: [],
     outputs: [{ id: 'out', kind: 'exec', label: 'Сработало' }],
     params: [
       {
-        key: 'cron',
-        label: 'Когда запускать',
+        key: 'mode',
+        label: 'Режим',
         type: 'select',
-        options: ['Каждый день в 14:00', 'Каждый час', 'По понедельникам в 09:00'],
-        def: 'Каждый день в 14:00',
+        options: ['weekly', 'once'],
+        labels: { weekly: 'Регулярно', once: 'Один раз' },
+        def: 'weekly',
       },
+      {
+        key: 'runDate',
+        label: 'Дата',
+        type: 'date',
+        def: '',
+        dependsOn: { key: 'mode', value: 'once' },
+        hint: 'Для однократного запуска.',
+      },
+      {
+        key: 'runTime',
+        label: 'Время',
+        type: 'time',
+        def: '09:00',
+      },
+      {
+        key: 'weekday',
+        label: 'День недели',
+        type: 'select',
+        options: ['*', '1', '2', '3', '4', '5', '6', '7'],
+        labels: { '*': 'Каждый день', '1': 'Понедельник', '2': 'Вторник', '3': 'Среда', '4': 'Четверг', '5': 'Пятница', '6': 'Суббота', '7': 'Воскресенье' },
+        def: '1',
+        dependsOn: { key: 'mode', value: 'weekly' },
+      },
+      {
+        key: 'timezone',
+        label: 'Часовой пояс',
+        type: 'select',
+        options: ['Europe/Moscow', 'UTC', 'Europe/Berlin', 'Asia/Almaty', 'Asia/Yekaterinburg'],
+        def: 'Europe/Moscow',
+      },
+      { key: 'cron', type: 'string', def: '', hidden: true },
     ],
   },
   'source.repo': {

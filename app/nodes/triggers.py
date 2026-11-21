@@ -47,47 +47,89 @@ class ScheduleTrigger(BaseNode):
     type = "trigger.schedule"
     category = "trigger"
     title = "Расписание"
-    description = "Запускает сценарий по cron-расписанию (5 полей: минуты, часы, день, месяц, день недели)."
+    description = "Запускает сценарий один раз в выбранную дату/время или регулярно по дню недели и времени."
     icon = "⏰"
     color = "#0ea5e9"
     inputs: list[HandleSpec] = []
     outputs = [HandleSpec("out", "Запуск")]
     params = [
         ParamSpec(
-            "cron",
-            "string",
-            "Cron-выражение",
-            "5 полей: минута час день_месяца месяц день_недели. Например, 0 14 * * *",
-            default="0 9 * * 1-5",
-            required=True,
-            placeholder="0 14 * * *",
+            "mode",
+            "select",
+            "Режим",
+            "Один раз в конкретную дату или регулярно по дням",
+            default="weekly",
+            options=["weekly", "once"],
+        ),
+        ParamSpec(
+            "run_date",
+            "date",
+            "Дата",
+            "Для режима «Один раз»: YYYY-MM-DD",
+            default="",
+            depends_on={"mode": "once"},
+        ),
+        ParamSpec(
+            "run_time",
+            "time",
+            "Время",
+            "Локальное время запуска, HH:MM",
+            default="09:00",
+        ),
+        ParamSpec(
+            "weekday",
+            "select",
+            "День недели",
+            "Для регулярного запуска; * — каждый день",
+            default="1",
+            options=["*", "1", "2", "3", "4", "5", "6", "7"],
+            depends_on={"mode": "weekly"},
         ),
         ParamSpec(
             "timezone",
             "string",
             "Часовой пояс",
             "IANA-таймзона для расчёта расписания",
-            default="UTC",
-            options=["UTC", "Europe/Moscow", "Europe/Berlin", "Asia/Almaty"],
+            default="Europe/Moscow",
+            options=["UTC", "Europe/Moscow", "Europe/Berlin", "Asia/Almaty", "Asia/Yekaterinburg"],
+        ),
+        ParamSpec(
+            "cron",
+            "string",
+            "Cron (устаревшее)",
+            "Оставлено для старых сценариев: 5 полей cron",
+            default="",
+            placeholder="0 14 * * *",
         ),
     ]
-    tags = ["trigger", "schedule", "cron"]
+    tags = ["trigger", "schedule", "daily", "weekly"]
 
     def execute(self, ctx, params: dict) -> NodeResult:
+        mode = params.get("mode") or "weekly"
+        when = params.get("run_time") or "09:00"
+        if mode == "once":
+            when = f"{params.get('run_date') or '—'} {when}"
+        else:
+            weekday = params.get("weekday") or "*"
+            when = f"{'каждый день' if weekday == '*' else 'день ' + str(weekday)} {when}"
         ctx.emit(
             "trigger.fired",
-            f"Запуск по расписанию {params.get('cron')} ({params.get('timezone')})",
+            f"Запуск по расписанию: {when} ({params.get('timezone')})",
             node_id=ctx.node_id,
         )
         return NodeResult(
             outputs={
                 "triggered_at": _now(),
                 "type": "schedule",
+                "mode": mode,
+                "run_date": params.get("run_date"),
+                "run_time": params.get("run_time"),
+                "weekday": params.get("weekday"),
                 "cron": params.get("cron"),
                 "timezone": params.get("timezone"),
             },
             active_handles=["out"],
-            message=f"Расписание: {params.get('cron')}",
+            message=f"Расписание: {when}",
         )
 
 

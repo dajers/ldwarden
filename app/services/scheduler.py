@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Settings
@@ -67,6 +67,38 @@ def cron_matches(expression: str, moment: datetime) -> bool:
     return dom_ok and dow_ok
 
 
+def _time_matches(value: str, moment: datetime) -> bool:
+    try:
+        hour_text, minute_text = str(value or "09:00").strip().split(":", 1)
+        return moment.hour == int(hour_text) and moment.minute == int(minute_text)
+    except (TypeError, ValueError):
+        return False
+
+
+def schedule_matches(params: dict, moment: datetime) -> bool:
+    mode = str(params.get("mode") or "").strip().lower()
+    if mode == "once":
+        raw_date = str(params.get("run_date") or "").strip()
+        try:
+            target = date.fromisoformat(raw_date)
+        except ValueError:
+            return False
+        return moment.date() == target and _time_matches(params.get("run_time"), moment)
+    if mode in {"weekly", "daily"}:
+        weekday = str(params.get("weekday") or "*").strip()
+        if mode == "daily":
+            weekday = "*"
+        if weekday != "*":
+            try:
+                if moment.isoweekday() != int(weekday):
+                    return False
+            except ValueError:
+                return False
+        return _time_matches(params.get("run_time"), moment)
+    cron = str(params.get("cron") or "")
+    return cron_matches(cron, moment)
+
+
 class ScheduleService:
     def __init__(self, settings: Settings, engine: WorkflowEngine):
         self.settings = settings
@@ -99,6 +131,8 @@ class ScheduleService:
         started: list[str] = []
         workflows = WorkflowRow.select()
         for workflow in workflows:
+            if workflow.is_template or workflow.published:
+                continue
             try:
                 graph = json.loads(workflow.graph)
             except (TypeError, ValueError):
@@ -114,7 +148,7 @@ class ScheduleService:
                 except (ZoneInfoNotFoundError, ValueError):
                     tz = timezone.utc
                 local_now = (now or datetime.now(timezone.utc)).astimezone(tz)
-                if not cron_matches(cron, local_now):
+                if not schedule_matches(params, local_now):
                     continue
                 state = ScheduleStateRow.get_or_none(
                     (ScheduleStateRow.workflow_id == workflow.id)

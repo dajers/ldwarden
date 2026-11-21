@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 
-from app.services.scheduler import cron_matches
+from app.services.scheduler import cron_matches, schedule_matches
 
 
 class CronTests(unittest.TestCase):
@@ -27,6 +27,23 @@ class CronTests(unittest.TestCase):
     def test_range(self):
         self.assertTrue(cron_matches("0 9-18 * * 1-5", datetime(2026, 11, 20, 10, 0)))
         self.assertFalse(cron_matches("0 9-18 * * 1-5", datetime(2026, 11, 21, 10, 0)))
+
+    def test_one_time_date_and_time(self):
+        params = {"mode": "once", "run_date": "2026-11-20", "run_time": "14:30"}
+        self.assertTrue(schedule_matches(params, datetime(2026, 11, 20, 14, 30)))
+        self.assertFalse(schedule_matches(params, datetime(2026, 11, 20, 14, 31)))
+        self.assertFalse(schedule_matches(params, datetime(2026, 11, 21, 14, 30)))
+
+    def test_weekly_time(self):
+        params = {"mode": "weekly", "weekday": "5", "run_time": "09:00"}
+        self.assertTrue(schedule_matches(params, datetime(2026, 11, 20, 9, 0)))
+        self.assertFalse(schedule_matches(params, datetime(2026, 11, 19, 9, 0)))
+        params["weekday"] = "*"
+        self.assertTrue(schedule_matches(params, datetime(2026, 11, 19, 9, 0)))
+
+    def test_invalid_schedule_values(self):
+        self.assertFalse(schedule_matches({"mode": "once", "run_date": "bad", "run_time": "09:00"}, datetime(2026, 11, 20, 9, 0)))
+        self.assertFalse(schedule_matches({"mode": "weekly", "weekday": "8", "run_time": "09:00"}, datetime(2026, 11, 20, 9, 0)))
 
     def test_invalid(self):
         self.assertFalse(cron_matches("bad cron", datetime(2026, 11, 20, 9, 0)))

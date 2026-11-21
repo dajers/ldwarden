@@ -153,7 +153,7 @@ def _daily_graph() -> dict:
                     40,
                     240,
                     "Каждый день в 14:00",
-                    {"cron": "0 14 * * *", "timezone": "UTC"},
+                    {"mode": "weekly", "weekday": "*", "run_time": "14:00", "timezone": "UTC"},
                 ),
                 _node("source", "source.target", 320, 240, "Источник кода"),
                 _node("secrets", "scan.secrets", 620, 80, "Секреты"),

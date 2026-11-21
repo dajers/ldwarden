@@ -301,6 +301,7 @@ const state = {
   libraryAt: 0,
   libraryLoading: false,
   libraryError: '',
+  schedulerEnabled: null,
 };
 
 let customPresets = loadCustomPresets();
@@ -329,6 +330,9 @@ async function hydrateRemote() {
       let label = { local: 'AI · локальная модель', fake: 'AI · тест', openai: 'AI · API', ollama: 'AI · Ollama', none: 'AI · fallback' }[provider] || `AI · ${provider}`;
       if (provider === 'local' && health.llm.ready === false) label = 'AI · fallback (нет llama-cpp)';
       setAiPill(label);
+    }
+    if (health && health.scheduler) {
+      state.schedulerEnabled = Boolean(health.scheduler.enabled);
     }
   } catch {
     /* сервер может быть недоступен — работаем локально */
@@ -410,6 +414,30 @@ function normalizeGraph(raw) {
     const def = NODE_TYPES[n.type];
     const params = {};
     for (const p of def.params) params[p.key] = n.params && p.key in n.params ? n.params[p.key] : p.def;
+    if (n.type === 'trigger.schedule' && n.params && !n.params.mode && n.params.cron) {
+      const legacy = String(n.params.cron);
+      if (legacy === 'Каждый день в 14:00') {
+        params.mode = 'weekly';
+        params.weekday = '*';
+        params.runTime = '14:00';
+      } else if (legacy === 'По понедельникам в 09:00') {
+        params.mode = 'weekly';
+        params.weekday = '1';
+        params.runTime = '09:00';
+      } else if (legacy === 'Каждый час') {
+        params.mode = 'weekly';
+        params.weekday = '*';
+        params.runTime = '09:00';
+      } else {
+        const fields = legacy.trim().split(/\s+/);
+        if (fields.length === 5 && /^\d+$/.test(fields[0]) && /^\d+$/.test(fields[1])) {
+          params.mode = 'weekly';
+          params.runTime = `${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
+          params.weekday = /^\d$/.test(fields[4]) ? String(Number(fields[4]) === 0 ? 7 : Number(fields[4])) : '*';
+        }
+      }
+      params.cron = '';
+    }
     if (n.type === 'ai.explain' && params.timeout === 45 && params.maxFindings === 12 && params.threads === 4) {
       params.timeout = 180;
       params.maxFindings = 2;
@@ -1239,8 +1267,15 @@ function renderInspector() {
   root.append(inspectorHead(CATEGORIES[def.cat].label, def.title, def.icon));
 
   const body = h('div', { class: 'inspector__body' });
-  for (const param of def.params) body.append(renderField(node, param));
+  for (const param of def.params) {
+    if (param.hidden) continue;
+    if (param.dependsOn && String(node.params[param.dependsOn.key] ?? '') !== String(param.dependsOn.value)) continue;
+    body.append(renderField(node, param));
+  }
   if (node.type === 'logic.custom') body.append(h('p', { class: 'field__hint expr-hint', id: 'exprHint' }));
+  if (node.type === 'trigger.schedule' && state.schedulerEnabled === false) {
+    body.append(h('p', { class: 'field__hint' }, 'Планировщик выключен на сервере: задайте LDWARDEN_ENABLE_SCHEDULER=true в .env.'));
+  }
   body.append(renderNodeColor(node));
   if (api.isRemote && node.type === 'notify.telegram') {
     const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
@@ -1305,6 +1340,35 @@ function renderField(node, param) {
     return wrap;
   }
 
+  if (param.type === 'time') {
+    const raw = String(value || '09:00').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    const hourValue = match ? Math.min(23, Number(match[1])) : 9;
+    const minuteValue = match ? Math.min(59, Number(match[2])) : 0;
+    const row = h('div', { class: 'time-control' });
+    const hours = h('select', { class: 'select', 'aria-label': 'Часы' });
+    for (let index = 0; index < 24; index += 1) {
+      const text = String(index).padStart(2, '0');
+      const option = h('option', { value: text, text });
+      if (index === hourValue) option.selected = true;
+      hours.append(option);
+    }
+    const minutes = h('select', { class: 'select', 'aria-label': 'Минуты' });
+    for (let index = 0; index < 60; index += 1) {
+      const text = String(index).padStart(2, '0');
+      const option = h('option', { value: text, text });
+      if (index === minuteValue) option.selected = true;
+      minutes.append(option);
+    }
+    const sync = () => setParam(node, param.key, `${hours.value}:${minutes.value}`);
+    hours.addEventListener('change', sync);
+    minutes.addEventListener('change', sync);
+    row.append(hours, h('span', { text: ':' }), minutes);
+    wrap.append(row);
+    if (param.hint) wrap.append(h('p', { class: 'field__hint', text: param.hint }));
+    return wrap;
+  }
+
   if (param.type === 'select') {
     const select = h('select', { class: 'select' });
     for (const option of param.options) {
@@ -1313,12 +1377,15 @@ function renderField(node, param) {
       if (String(option) === String(value)) optionEl.selected = true;
       select.append(optionEl);
     }
-    select.addEventListener('change', () => setParam(node, param.key, select.value));
+    select.addEventListener('change', () => {
+      setParam(node, param.key, select.value);
+      if (node.type === 'trigger.schedule') renderInspector();
+    });
     wrap.append(select);
   } else {
     const input = h('input', {
       class: 'input',
-      type: param.type === 'number' ? 'number' : param.type === 'secret' ? 'password' : 'text',
+      type: param.type === 'number' ? 'number' : param.type === 'secret' ? 'password' : param.type === 'date' ? 'date' : param.type === 'time' ? 'time' : 'text',
       value: value ?? '',
       autocomplete: 'off',
       spellcheck: 'false',
@@ -1817,6 +1884,16 @@ function validate() {
   if (!nodes.length) return 'Перетащите узлы на холст или выберите пресет';
   const triggers = nodes.filter((n) => n.type.startsWith('trigger.'));
   if (!triggers.length) return 'Добавьте узел запуска';
+  for (const trigger of triggers.filter((node) => node.type === 'trigger.schedule')) {
+    if (!/^\d{2}:\d{2}$/.test(String(trigger.params.runTime || ''))) {
+      return 'Укажите время запуска в формате ЧЧ:ММ';
+    }
+    if (trigger.params.mode === 'once') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(trigger.params.runDate || ''))) {
+        return 'Выберите дату однократного запуска';
+      }
+    }
+  }
   const sources = nodes.filter((n) => n.type === 'source.repo');
   if (!sources.length) return 'Добавьте узел «Репозиторий»';
   const scans = nodes.filter((n) => n.type.startsWith('scan.'));

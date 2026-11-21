@@ -67,6 +67,20 @@ const CRON_FROM_LABEL = Object.fromEntries(
   Object.entries(CRON_TO_LABEL).map(([cron, label]) => [label, cron]),
 );
 
+function scheduleFromCron(cron) {
+  const parts = String(cron || '').trim().split(/\s+/);
+  let runTime = '09:00';
+  let weekday = '*';
+  if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    runTime = `${String(parts[1]).padStart(2, '0')}:${String(parts[0]).padStart(2, '0')}`;
+    if (/^\d+$/.test(parts[4])) {
+      const value = Number(parts[4]);
+      weekday = value === 0 ? '7' : String(Math.min(7, Math.max(1, value)));
+    }
+  }
+  return { mode: 'weekly', runDate: '', runTime, weekday, cron: '' };
+}
+
 const FORMATS_TO_LABEL = {
   'json,md,sarif': 'JSON + Markdown + SARIF',
   'json,md': 'JSON + Markdown',
@@ -164,8 +178,12 @@ function mapParamsToBackend(node) {
       return { secret: params.secret || '', description: params.description || '' };
     case 'trigger.schedule':
       return {
-        cron: CRON_FROM_LABEL[params.cron] || String(params.cron || '0 14 * * *'),
-        timezone: 'UTC',
+        mode: params.mode || 'weekly',
+        run_date: params.runDate || '',
+        run_time: params.runTime || '09:00',
+        weekday: String(params.weekday || '*'),
+        timezone: params.timezone || 'UTC',
+        cron: params.cron || '',
       };
     case 'source.repo':
       return {
@@ -255,7 +273,17 @@ function mapParamsFromBackend(node) {
   const params = node.params || {};
   switch (node.type) {
     case 'trigger.schedule':
-      return { cron: CRON_TO_LABEL[params.cron] || params.cron || 'Каждый день в 14:00' };
+      if (params.mode === 'weekly' || params.mode === 'once') {
+        return {
+          mode: params.mode,
+          runDate: params.run_date || '',
+          runTime: params.run_time || '09:00',
+          weekday: String(params.weekday || '*'),
+          timezone: params.timezone || 'UTC',
+          cron: params.cron || '',
+        };
+      }
+      return { ...scheduleFromCron(params.cron), timezone: params.timezone || 'UTC' };
     case 'trigger.webhook':
       return { secret: params.secret || '', description: params.description || '' };
     case 'source.target':

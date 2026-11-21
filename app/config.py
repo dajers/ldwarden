@@ -101,7 +101,7 @@ class Settings:
     library_api_url: str = "https://api.github.com"
 
 
-    enable_scheduler: bool = False
+    enable_scheduler: bool = True
     scheduler_interval: int = 30
     scheduler_timezone: str = "UTC"
 
@@ -275,7 +275,7 @@ def load_settings(overrides: dict | None = None) -> Settings:
         library_path=_str("LDWARDEN_LIBRARY_PATH", "presets"),
         library_token=_str("LDWARDEN_LIBRARY_TOKEN", ""),
         library_api_url=_str("LDWARDEN_LIBRARY_API_URL", "https://api.github.com"),
-        enable_scheduler=_bool("LDWARDEN_ENABLE_SCHEDULER", False),
+        enable_scheduler=_bool("LDWARDEN_ENABLE_SCHEDULER", True),
         scheduler_interval=_int("LDWARDEN_SCHEDULER_INTERVAL", 30),
         scheduler_timezone=_str("LDWARDEN_SCHEDULER_TZ", "UTC"),
         seed_templates=_bool("LDWARDEN_SEED_TEMPLATES", True),
