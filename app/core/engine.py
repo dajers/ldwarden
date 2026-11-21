@@ -244,6 +244,9 @@ class WorkflowEngine:
         if not report["valid"]:
             raise ValueError("; ".join(report["errors"]))
         graph = report["graph"]
+        from app.services.custom_nodes import expand_composite_nodes
+
+        graph = expand_composite_nodes(graph)
         run_id = uuid.uuid4().hex[:16]
         RunRow.create(
             id=run_id,

@@ -173,6 +173,7 @@ function targetPayload(workflow) {
 
 function mapParamsToBackend(node) {
   const params = node.params || {};
+  if (String(node.type || '').startsWith('custom-')) return { ...params };
   switch (node.type) {
     case 'trigger.webhook':
       return { secret: params.secret || '', description: params.description || '' };
@@ -271,6 +272,7 @@ function mapParamsToBackend(node) {
 
 function mapParamsFromBackend(node) {
   const params = node.params || {};
+  if (String(node.type || '').startsWith('custom-')) return { ...params };
   switch (node.type) {
     case 'trigger.schedule':
       if (params.mode === 'weekly' || params.mode === 'once') {
@@ -379,7 +381,7 @@ function execPort(port) {
 
 export function toBackendGraph(workflow) {
   const nodes = (workflow.nodes || [])
-    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || ['scan.sca', 'scan.sast', 'notify.telegram', 'notify.webhook', 'notify.send', 'report.build'].includes(node.type))
+    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || node.type.startsWith('custom-') || ['scan.sca', 'scan.sast', 'notify.telegram', 'notify.webhook', 'notify.send', 'report.build'].includes(node.type))
     .map((node) => ({
       id: node.id,
       type: TYPE_TO_BACKEND[node.type] || node.type,
@@ -403,7 +405,7 @@ export function toBackendGraph(workflow) {
       source: edge.from.node,
       sourceHandle: edge.from.port,
       target: edge.to.node,
-      targetHandle: 'in',
+      targetHandle: edge.to.port || 'in',
     }));
   return { nodes, edges };
 }
@@ -419,7 +421,7 @@ export function fromBackendWorkflow(row) {
     }
     if (
       !frontType.startsWith('trigger.') &&
-      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.telegram', 'notify.webhook', 'report.build'].includes(frontType)
+      !frontType.startsWith('custom-') && !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.telegram', 'notify.webhook', 'report.build'].includes(frontType)
     ) {
       continue;
     }
@@ -497,6 +499,53 @@ function mapNotification(notification) {
     target: notification.target,
     message: notification.message,
   };
+}
+
+async function nodeCatalog() {
+  return request('/nodes');
+}
+
+async function customNodes() {
+  return request('/custom-nodes');
+}
+
+async function customNode(id) {
+  return request(`/custom-nodes/${encodeURIComponent(id)}`);
+}
+
+async function createCustomNode(payload) {
+  return request('/custom-nodes', { method: 'POST', body: payload });
+}
+
+async function updateCustomNode(id, payload) {
+  return request(`/custom-nodes/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
+}
+
+async function deleteCustomNode(id) {
+  return request(`/custom-nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+async function testCustomNode(id, params) {
+  const response = await fetch(`${CONFIG.baseUrl}/custom-nodes/${encodeURIComponent(id)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ params }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!data) throw new Error(`HTTP ${response.status}`);
+  return data;
+}
+
+async function importCustomNode(payload) {
+  return request('/custom-nodes/import', { method: 'POST', body: payload });
+}
+
+async function networkRules() {
+  return request('/settings/network');
+}
+
+async function saveNetworkRules(payload) {
+  return request('/settings/network', { method: 'PUT', body: payload });
 }
 
 async function listRuns(limit = 50) {
@@ -854,6 +903,14 @@ async function schedulePreview(params) {
   return request('/schedules/preview', { method: 'POST', body: params });
 }
 
+async function publishLibraryNode(nodeId) {
+  return request('/library/publish-node', { method: 'POST', body: { node_id: nodeId } });
+}
+
+async function libraryInstall(payload) {
+  return request('/library/install', { method: 'POST', body: payload });
+}
+
 async function libraryPresets(force = false) {
   return request(`/library${force ? '?refresh=1' : ''}`);
 }
@@ -881,12 +938,24 @@ export const api = {
   saveWorkflow,
   models,
   libraryPresets,
+  libraryInstall,
+  publishLibraryNode,
   publishLibraryPreset,
   schedulePreview,
   health,
   telegramConnect,
   telegramChats,
   telegramLink,
+  nodeCatalog,
+  customNodes,
+  customNode,
+  createCustomNode,
+  updateCustomNode,
+  deleteCustomNode,
+  testCustomNode,
+  importCustomNode,
+  networkRules,
+  saveNetworkRules,
   listRuns,
   runDetail,
   runFindings,

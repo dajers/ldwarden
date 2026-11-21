@@ -9,7 +9,7 @@
     // тема ставится до первой отрисовки, чтобы не было вспышки
     try {
       var saved = localStorage.getItem('sakura.theme');
-      if (saved === 'mono' || saved === 'warden') document.documentElement.dataset.theme = saved;
+      if (['mono', 'warden', 'github', 'github-dark'].includes(saved)) document.documentElement.dataset.theme = saved;
     } catch (e) {}
   </script>
   <link rel="icon" type="image/svg+xml" href="assets/hedgehog.svg" />
@@ -54,6 +54,9 @@
     <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="1.2" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4h5v2.5"/><path d="M6.5 6.5 7.5 20h9l1-13.5"/><path d="M10.5 10v6M13.5 10v6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-theme-blossom" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><circle cx="12" cy="6.4" r="2.3"/><circle cx="17.2" cy="10.3" r="2.3"/><circle cx="15.2" cy="16.4" r="2.3"/><circle cx="8.8" cy="16.4" r="2.3"/><circle cx="6.8" cy="10.3" r="2.3"/></symbol>
+    <symbol id="i-theme-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a4.25 4.25 0 0 0 0 8.5 4.25 4.25 0 0 1 0 8.5"/><circle cx="12" cy="7.6" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="16.4" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-theme-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M6 15c0-4 4.2-6 9-6h.8"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 21 20H3Z"/><path d="M12 9.5v4.5M12 17.2v.1"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
@@ -82,23 +85,32 @@
     <div class="topbar__actions">
       <div class="theme-switch" id="themeSwitch">
         <button class="theme-switch__trigger" id="themeBtn" type="button" aria-label="Сменить тему оформления" aria-haspopup="true" aria-expanded="false" title="Тема оформления">
-          <img src="assets/palm.jpg" alt="" />
+          <svg class="icon"><use href="#i-theme-contrast"/></svg>
         </button>
         <div class="theme-menu" id="themeMenu" role="menu" aria-label="Темы оформления">
           <button class="theme-option" type="button" role="menuitem" data-theme="sakura">
-            <img src="assets/sakura.jpg" alt="" /><span>Сакура</span>
+            <span class="theme-option__icon"><svg class="icon"><use href="#i-theme-blossom"/></svg></span><span>Сакура</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
           </button>
           <button class="theme-option" type="button" role="menuitem" data-theme="mono">
-            <img src="assets/yin-yang.webp" alt="" /><span>Черно-белый</span>
+            <span class="theme-option__icon"><svg class="icon"><use href="#i-theme-contrast"/></svg></span><span>Черно-белый</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
           </button>
           <button class="theme-option" type="button" role="menuitem" data-theme="warden">
-            <img src="assets/shield.webp" alt="" /><span>Варден</span>
+            <span class="theme-option__icon"><svg class="icon"><use href="#i-shield"/></svg></span><span>Варден</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="github">
+            <span class="theme-option__icon theme-option__icon--github"><svg class="icon"><use href="#i-theme-branch"/></svg></span><span>GitHub</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="github-dark">
+            <span class="theme-option__icon theme-option__icon--github-dark"><svg class="icon"><use href="#i-theme-branch"/></svg></span><span>GitHub Dark</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
           </button>
         </div>
       </div>
+      <button class="btn btn--ghost" id="compositeBtn" type="button" disabled>Свернуть в ноду</button>
       <button class="btn btn--ghost" id="historyBtn" type="button">
         <svg class="icon"><use href="#i-history"/></svg>История
       </button>
@@ -114,6 +126,7 @@
     <button class="workspace-tab is-active" type="button" data-workspace="graph">Конструктор</button>
     <button class="workspace-tab" type="button" data-workspace="presets">Пресеты</button>
     <button class="workspace-tab" type="button" data-workspace="runs">Процессы</button>
+    <button class="workspace-tab" type="button" data-workspace="nodes">Ноды</button>
     <button class="workspace-tab" type="button" data-workspace="library">Библиотека</button>
   </nav>
 
@@ -136,6 +149,31 @@
       <input class="input" id="presetSearch" type="search" placeholder="Поиск пресета по названию…" autocomplete="off" />
     </div>
     <div class="preset-grid" id="presetsGrid"></div>
+  </section>
+
+  <div class="composite-banner" id="compositeBanner" hidden>
+    <span id="compositeBannerTitle">Редактирование композитной ноды</span>
+    <div class="composite-banner__actions">
+      <button class="btn btn--primary btn--sm" id="compositeSaveBtn" type="button">Сохранить</button>
+      <button class="btn btn--ghost btn--sm" id="compositeCancelBtn" type="button">Отмена</button>
+    </div>
+  </div>
+
+  <section class="workspace-page" id="nodesView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">Свои проверки</span>
+        <h1>Ноды</h1>
+        <p>HTTP-, AI- и композитные ноды. Создавайте свои блоки и используйте их в сценариях.</p>
+      </div>
+      <div class="workspace-page__actions">
+        <button class="btn btn--primary" id="customNodeCreateBtn" type="button">Создать ноду</button>
+        <input id="customNodeImportInput" type="file" accept=".json,application/json" hidden />
+        <button class="btn btn--ghost" id="customNodeImportBtn" type="button">Импорт</button>
+        <button class="btn btn--ghost" id="networkRulesBtn" type="button">Сетевые правила</button>
+      </div>
+    </div>
+    <div class="custom-nodes-grid" id="customNodesGrid"></div>
   </section>
 
   <section class="workspace-page" id="runsView" hidden>
@@ -171,6 +209,11 @@
         <button class="btn btn--ghost" id="libraryRefreshBtn" type="button">Обновить</button>
         <button class="btn btn--primary" id="libraryPublishBtn" type="button">Опубликовать текущий</button>
       </div>
+    </div>
+    <div class="library-filters" id="libraryFilters">
+      <button class="library-filter is-active" type="button" data-library-filter="all">Все</button>
+      <button class="library-filter" type="button" data-library-filter="presets">Пресеты</button>
+      <button class="library-filter" type="button" data-library-filter="nodes">Ноды</button>
     </div>
     <div class="workspace-page__search">
       <svg class="icon"><use href="#i-search"/></svg>

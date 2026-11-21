@@ -132,7 +132,8 @@ const snap = (v, step = 10) => Math.round(v / step) * step;
 /* ------------------------------------------------------------------ */
 
 const THEME_KEY = 'sakura.theme';
-const THEMES = ['sakura', 'mono', 'warden'];
+const THEMES = ['sakura', 'mono', 'warden', 'github', 'github-dark'];
+const THEME_ICONS = { sakura: 'i-theme-blossom', mono: 'i-theme-contrast', warden: 'i-shield', github: 'i-theme-branch', 'github-dark': 'i-theme-branch' };
 let currentTheme = readTheme();
 
 function readTheme() {
@@ -157,6 +158,8 @@ function applyTheme(theme, { persist = true } = {}) {
     }
   }
   for (const option of $$('.theme-option')) option.classList.toggle('is-active', option.dataset.theme === next);
+  const triggerIcon = $('#themeBtn use');
+  if (triggerIcon) triggerIcon.setAttribute('href', `#${THEME_ICONS[next] || 'i-theme-contrast'}`);
 }
 
 function initThemeSwitch() {
@@ -301,6 +304,7 @@ const state = {
   libraryAt: 0,
   libraryLoading: false,
   libraryError: '',
+  libraryFilter: 'all',
   schedulerEnabled: null,
   models: [],
   modelsLoaded: false,
@@ -308,6 +312,9 @@ const state = {
   schedules: [],
   runsTimer: null,
   runsLoading: false,
+  customNodes: [],
+  customCatalog: {},
+  compositeEdit: null,
 };
 
 let customPresets = loadCustomPresets();
@@ -340,6 +347,8 @@ async function hydrateRemote() {
     if (health && health.scheduler) {
       state.schedulerEnabled = Boolean(health.scheduler.enabled);
     }
+    await loadCustomCatalog();
+    await refreshCustomNodes();
     const catalog = await api.models();
     if (catalog) {
       state.models = Array.isArray(catalog.items) ? catalog.items : [];
@@ -537,6 +546,7 @@ function saveWorkflow() {
     /* приватный режим */
   }
   updateActivePreset();
+  if (state.compositeEdit) return;
   if (!api.isRemote || !state.workflow.nodes.length) return;
   setSavePill('Сохраняем…');
   clearTimeout(syncTimer);
@@ -721,14 +731,34 @@ function presetBundle(presets) {
   };
 }
 
-function exportPreset(preset) {
+function usedCustomTypes(workflow) {
+  return [...new Set((workflow && workflow.nodes || []).map((node) => node.type).filter((type) => String(type).startsWith('custom-')))];
+}
+
+async function exportPreset(preset) {
   if (!preset || !preset.workflow) return;
+  const types = usedCustomTypes(preset.workflow);
   download(
     `ldwarden-preset-${preset.name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 50) || 'preset'}.json`,
     JSON.stringify(presetBundle([preset]), null, 2),
     'application/json',
   );
-  toast(`Пресет «${preset.name}» выгружен`, 'ok');
+  for (const type of types) await downloadCustomNode(type);
+  toast(
+    types.length ? `Пресет и ${types.length} нод(ы) выгружены отдельными файлами` : `Пресет «${preset.name}» выгружен`,
+    'ok',
+  );
+}
+
+function pickNodeFiles() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.multiple = true;
+    input.addEventListener('change', () => resolve([...(input.files || [])]));
+    input.click();
+  });
 }
 
 function exportCustomPresets() {
@@ -764,6 +794,26 @@ async function importCustomPresets(file) {
     const list = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.presets) ? parsed.presets : [parsed];
     const incoming = list.map(normalizeImportedPreset).filter(Boolean);
     if (!incoming.length) throw new Error('В файле нет валидных пресетов');
+    const needed = new Set();
+    for (const preset of incoming) for (const type of usedCustomTypes(preset.workflow)) needed.add(type);
+    const missing = [...needed].filter((type) => !(state.customNodes || []).some((node) => node.id === type));
+    if (missing.length) {
+      toast(`В пресете ${missing.length} своих нод — выберите их .node.json файлы`, 'info');
+      const files = await pickNodeFiles();
+      for (const nodeFile of files) {
+        try {
+          await api.importCustomNode(JSON.parse(await nodeFile.text()));
+        } catch (error) {
+          toast(`Не удалось импортировать ${nodeFile.name}`, 'warn');
+        }
+      }
+      if (files.length) {
+        await loadCustomCatalog();
+        await refreshCustomNodes();
+      }
+      const stillMissing = missing.filter((type) => !(state.customNodes || []).some((node) => node.id === type));
+      if (stillMissing.length) toast(`Без нод: ${stillMissing.join(', ')}. Сценарий может не запуститься`, 'warn');
+    }
     const byName = new Map(customPresets.map((preset) => [preset.name, preset]));
     for (const preset of incoming) byName.set(preset.name, preset);
     customPresets = [...byName.values()].slice(-50);
@@ -1126,16 +1176,644 @@ async function openWorkflowById(id) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* свои ноды                                                           */
+/* ------------------------------------------------------------------ */
+
+const CUSTOM_ICONS = ['box', 'shield', 'key', 'send', 'search', 'clock', 'package', 'link', 'play', 'gauge'];
+const CUSTOM_PARAM_TYPES = {
+  string: 'text',
+  text: 'textarea',
+  number: 'number',
+  boolean: 'toggle',
+  select: 'select',
+  secret: 'secret',
+  json: 'textarea',
+  keyvalue: 'keyvalue',
+};
+const CUSTOM_BACKEND_TYPES = ['string', 'text', 'number', 'boolean', 'select', 'secret', 'json', 'keyvalue'];
+
+function customSpecToType(spec) {
+  const params = (spec.params || []).map((param) => ({
+    key: param.name,
+    label: param.label || param.name,
+    type: CUSTOM_PARAM_TYPES[param.type] || 'text',
+    def: param.default,
+    hint: param.description || '',
+    required: Boolean(param.required),
+    options: param.options || [],
+  }));
+  const ports = (list, fallback) =>
+    (Array.isArray(list) && list.length ? list : fallback).map((port) => ({
+      id: port.id,
+      kind: port.kind === 'data' ? 'data' : 'exec',
+      label: port.label || port.id,
+    }));
+  const kind = spec.kind || (Array.isArray(spec.tags) ? spec.tags[1] : '') || 'http';
+  return {
+    cat: 'custom',
+    icon: spec.icon || 'box',
+    title: spec.title,
+    sub: (values) =>
+      `${kind === 'http' ? 'HTTP' : kind === 'ai' ? 'AI' : 'Композит'}` +
+      (values && Object.keys(values).length ? ' · настроена' : ''),
+    inputs: ports(spec.inputs, [{ id: 'in', kind: 'exec', label: 'Вход' }]),
+    outputs: ports(spec.outputs, [{ id: 'out', kind: 'exec', label: 'Выход' }]),
+    params,
+  };
+}
+
+async function loadCustomCatalog() {
+  try {
+    const data = await api.nodeCatalog();
+    for (const spec of (data && data.items) || []) {
+      if (spec.category === 'custom') NODE_TYPES[spec.type] = customSpecToType(spec);
+    }
+    renderPalette();
+  } catch {
+    /* сервер может быть недоступен */
+  }
+}
+
+async function refreshCustomNodes() {
+  try {
+    const data = await api.customNodes();
+    state.customNodes = (data && data.items) || [];
+  } catch {
+    /* сервер может быть недоступен */
+  }
+  return state.customNodes;
+}
+
+async function openNodesView() {
+  renderNodesPage();
+  await refreshCustomNodes();
+  renderNodesPage();
+}
+
+function renderNodesPage() {
+  const root = $('#customNodesGrid');
+  if (!root) return;
+  root.replaceChildren();
+  const items = state.customNodes || [];
+  if (!items.length) {
+    root.append(
+      h('div', { class: 'custom-nodes-empty' },
+        h('h2', { text: 'Пока нет своих нод' }),
+        h('p', { text: 'Создайте HTTP- или AI-ноду — она появится в палитре в категории «Мои ноды».' })),
+    );
+    return;
+  }
+  for (const item of items) {
+    const kindLabel = item.kind === 'http' ? 'HTTP' : item.kind === 'ai' ? 'AI' : 'Композитная';
+    const edit = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Изменить' });
+    edit.addEventListener('click', () => openCustomNodeEditor(item));
+    const use = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'На холст' });
+    use.addEventListener('click', () => {
+      if (!NODE_TYPES[item.id]) NODE_TYPES[item.id] = customSpecToType({
+        type: item.id, title: item.name, kind: item.kind, icon: item.icon,
+        inputs: item.inputs, outputs: item.outputs, params: item.params,
+      });
+      showWorkspace('graph');
+      addNodeAtCenter(item.id);
+    });
+    const exportBtn = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Экспорт' });
+    exportBtn.addEventListener('click', () => downloadCustomNode(item.id));
+    const publish = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'В библиотеку' });
+    publish.addEventListener('click', async () => {
+      try {
+        const result = await api.publishLibraryNode(item.id);
+        toast(`Нода опубликована: ${result.path || item.name}`, 'ok');
+        await loadLibrary(true);
+        renderLibraryPage();
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось опубликовать ноду', 'warn');
+      }
+    });
+    const remove = h('button', { class: 'icon-btn', type: 'button', title: 'Удалить ноду', 'aria-label': 'Удалить ноду' }, svgIcon('trash'));
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`Удалить ноду «${item.name}»?`)) return;
+      try {
+        await api.deleteCustomNode(item.id);
+        delete NODE_TYPES[item.id];
+        await loadCustomCatalog();
+        await openNodesView();
+        toast('Нода удалена', 'ok');
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось удалить ноду', 'warn');
+      }
+    });
+    root.append(
+      h('article', { class: 'custom-node-card' },
+        h('div', { class: 'custom-node-card__top' },
+          h('span', { class: 'custom-node-card__icon' }, svgIcon(item.icon || 'box')),
+          h('div', { class: 'custom-node-card__title' },
+            h('h2', { text: item.name }),
+            h('p', { text: `${kindLabel} · v${item.version || 1}` }))),
+        h('p', { class: 'custom-node-card__desc', text: item.description || 'Без описания' }),
+        h('div', { class: 'custom-node-card__actions' }, edit, use, exportBtn, remove)),
+    );
+  }
+}
+
+function downloadCustomNode(nodeId) {
+  fetch(`/api/custom-nodes/${encodeURIComponent(nodeId)}/export`)
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${nodeId}.node.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    })
+    .catch(() => toast('Не удалось экспортировать ноду', 'warn'));
+}
+
+function defaultCustomDraft() {
+  return {
+    name: '',
+    kind: 'http',
+    icon: 'box',
+    color: '#8b5cf6',
+    description: '',
+    inputs: [{ id: 'in', label: 'Вход', kind: 'exec' }],
+    outputs: [
+      { id: 'out', label: 'Выход', kind: 'exec' },
+      { id: 'response', label: 'Ответ', kind: 'data' },
+    ],
+    params: [],
+    runtime: {
+      method: 'GET',
+      url: '',
+      headers: {},
+      body: '',
+      timeout: 20,
+      findings: {
+        enabled: true,
+        from: '',
+        category: 'CUSTOM',
+        default_severity: 'MEDIUM',
+        map: { severity: 'severity', title: 'message', path: 'path', line: 'line', rule: 'rule' },
+      },
+    },
+  };
+}
+
+function editorInput(value, onInput, placeholder, type) {
+  const input = h('input', { class: 'input', type: type || 'text', placeholder: placeholder || '', value: value == null ? '' : String(value) });
+  input.addEventListener('input', () => onInput(input.value));
+  return input;
+}
+
+function editorSelect(value, options, onChange, labels) {
+  const select = h('select', { class: 'select' });
+  for (const option of options) {
+    const optionEl = h('option', { value: option, text: (labels && labels[option]) || option });
+    if (String(option) === String(value)) optionEl.selected = true;
+    select.append(optionEl);
+  }
+  select.addEventListener('change', () => onChange(select.value));
+  return select;
+}
+
+function editorCheck(label, checked, onChange) {
+  const input = h('input', { type: 'checkbox' });
+  input.checked = Boolean(checked);
+  input.addEventListener('change', () => onChange(input.checked));
+  return h('label', { class: 'toggle toggle--compact' }, input, h('span', { class: 'toggle__track' }), h('span', { text: label }));
+}
+
+function openCustomNodeEditor(definition) {
+  const draft = definition ? JSON.parse(JSON.stringify(definition)) : defaultCustomDraft();
+  if (!draft.runtime) draft.runtime = defaultCustomDraft().runtime;
+  if (!draft.runtime.findings) draft.runtime.findings = defaultCustomDraft().runtime.findings;
+  if (!Array.isArray(draft.params)) draft.params = [];
+  if (!Array.isArray(draft.outputs)) draft.outputs = [{ id: 'out', label: 'Выход', kind: 'exec' }];
+  $('#modalTitle').textContent = draft.id ? 'Редактирование ноды' : 'Новая нода';
+  const root = $('#modalBody');
+  root.replaceChildren();
+  $('#modal').hidden = false;
+  let testResult = null;
+  let busy = false;
+
+  const mount = () => {
+    root.replaceChildren();
+    const basics = h('div', { class: 'node-editor__grid' },
+      h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Название' }), editorInput(draft.name, (value) => { draft.name = value; })),
+      h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Тип' }),
+        editorSelect(draft.kind, ['http', 'ai'], (value) => {
+          draft.kind = value;
+          if (value === 'ai' && !draft.runtime.prompt) {
+            draft.runtime = { provider: 'auto', system: '', prompt: '', max_tokens: 512, temperature: 0.2, findings: draft.runtime.findings };
+            draft.outputs = [{ id: 'out', label: 'Выход', kind: 'exec' }, { id: 'text', label: 'Текст', kind: 'data' }];
+          }
+          if (value === 'http' && !draft.runtime.url) {
+            draft.runtime = { ...defaultCustomDraft().runtime, findings: draft.runtime.findings };
+            draft.outputs = defaultCustomDraft().outputs;
+          }
+          mount();
+        }, { http: 'HTTP-запрос', ai: 'AI-промпт' })),
+      h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Иконка' }),
+        editorSelect(draft.icon, CUSTOM_ICONS, (value) => { draft.icon = value; }, Object.fromEntries(CUSTOM_ICONS.map((name) => [name, name])))),
+      h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Описание' }),
+        (() => { const area = h('textarea', { class: 'input input--area', rows: '2' }); area.value = draft.description || ''; area.addEventListener('input', () => { draft.description = area.value; }); return area; })()),
+    );
+
+    const paramsSection = h('section', { class: 'node-editor__section' },
+      h('h3', { text: 'Параметры' }),
+      h('p', { class: 'field__hint', text: 'Поля, которые пользователь заполняет в инспекторе ноды.' }));
+    const paramsBox = h('div', { class: 'params-editor' });
+    const drawParams = () => {
+      paramsBox.replaceChildren();
+      draft.params.forEach((param, index) => {
+        const row = h('div', { class: 'param-row' });
+        const name = editorInput(param.name, (value) => { param.name = value; }, 'ключ');
+        const label = editorInput(param.label, (value) => { param.label = value; }, 'подпись');
+        const type = editorSelect(param.type || 'string', CUSTOM_BACKEND_TYPES, (value) => { param.type = value; if (value === 'secret') param.secret = true; });
+        const def = editorInput(param.default, (value) => { param.default = value; }, 'по умолчанию');
+        const secret = editorCheck('секрет', param.secret, (value) => { param.secret = value; });
+        const required = editorCheck('обязательный', param.required, (value) => { param.required = value; });
+        const remove = h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Удалить параметр' }, svgIcon('x'));
+        remove.addEventListener('click', () => { draft.params.splice(index, 1); drawParams(); });
+        row.append(name, label, type, def, secret, required, remove);
+        paramsBox.append(row);
+      });
+      const add = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: '+ параметр' });
+      add.addEventListener('click', () => {
+        draft.params.push({ name: `param${draft.params.length + 1}`, label: 'Параметр', type: 'string', default: '', required: false, secret: false, options: [] });
+        drawParams();
+      });
+      paramsBox.append(add);
+    };
+    drawParams();
+    paramsSection.append(paramsBox);
+
+    const runtimeSection = h('section', { class: 'node-editor__section' }, h('h3', { text: draft.kind === 'http' ? 'HTTP-запрос' : 'AI-промпт' }));
+    if (draft.kind === 'http') {
+      const headersArea = h('textarea', { class: 'input input--area', rows: '2', placeholder: '{"Authorization": "Bearer …"}' });
+      headersArea.value = JSON.stringify(draft.runtime.headers || {}, null, 2);
+      headersArea.addEventListener('change', () => {
+        try { draft.runtime.headers = JSON.parse(headersArea.value || '{}'); } catch { /* оставляем как есть */ }
+      });
+      const bodyArea = h('textarea', { class: 'input input--area', rows: '3', placeholder: '{"key": "{{params.key}}"}' });
+      bodyArea.value = typeof draft.runtime.body === 'string' ? draft.runtime.body : JSON.stringify(draft.runtime.body || '', null, 2);
+      bodyArea.addEventListener('input', () => { draft.runtime.body = bodyArea.value; });
+      runtimeSection.append(
+        h('div', { class: 'node-editor__grid' },
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Метод' }),
+            editorSelect(draft.runtime.method || 'GET', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'], (value) => { draft.runtime.method = value; })),
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Таймаут, сек' }),
+            editorInput(draft.runtime.timeout || 20, (value) => { draft.runtime.timeout = Number(value) || 20; }, '20', 'number'))),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'URL' }),
+          editorInput(draft.runtime.url, (value) => { draft.runtime.url = value; }, 'https://api.example.com/check')),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Заголовки (JSON)' }), headersArea),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Тело запроса' }), bodyArea),
+      );
+    } else {
+      const systemArea = h('textarea', { class: 'input input--area', rows: '2' });
+      systemArea.value = draft.runtime.system || '';
+      systemArea.addEventListener('input', () => { draft.runtime.system = systemArea.value; });
+      const promptArea = h('textarea', { class: 'input input--area', rows: '4' });
+      promptArea.value = draft.runtime.prompt || '';
+      promptArea.addEventListener('input', () => { draft.runtime.prompt = promptArea.value; });
+      runtimeSection.append(
+        h('div', { class: 'node-editor__grid' },
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Провайдер' }),
+            editorSelect(draft.runtime.provider || 'auto', ['auto', 'local', 'openai', 'ollama'], (value) => { draft.runtime.provider = value; })),
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Макс. токенов' }),
+            editorInput(draft.runtime.max_tokens || 512, (value) => { draft.runtime.max_tokens = Number(value) || 512; }, '512', 'number')),
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Температура' }),
+            editorInput(draft.runtime.temperature ?? 0.2, (value) => { draft.runtime.temperature = Number(value) || 0; }, '0.2', 'number'))),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Системная инструкция' }), systemArea),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Промпт' }), promptArea),
+      );
+    }
+
+    const findings = draft.runtime.findings;
+    const findingsSection = h('section', { class: 'node-editor__section' }, h('h3', { text: 'Находки' }),
+      h('p', { class: 'field__hint', text: 'Если ответ содержит находки, укажите путь и поля — они попадут в общий результат.' }));
+    const fromInput = editorInput(findings.from, (value) => { findings.from = value; }, 'items или response.findings');
+    const categorySelect = editorSelect(findings.category || 'CUSTOM', ['CUSTOM', 'SECRET', 'SCA', 'SAST'], (value) => { findings.category = value; });
+    const severitySelect = editorSelect(findings.default_severity || 'MEDIUM', ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'], (value) => { findings.default_severity = value; });
+    const mapInputs = {};
+    for (const key of ['severity', 'title', 'path', 'line', 'rule']) {
+      mapInputs[key] = editorInput((findings.map || {})[key] || '', (value) => { findings.map = { ...(findings.map || {}), [key]: value }; }, key);
+    }
+    findingsSection.append(
+      h('div', { class: 'node-editor__grid' },
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Откуда (JSON-путь)' }), fromInput),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Категория' }), categorySelect),
+        h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Критичность по умолчанию' }), severitySelect)),
+      h('div', { class: 'node-editor__grid' },
+        ...['severity', 'title', 'path', 'line', 'rule'].map((key) =>
+          h('div', { class: 'field' }, h('label', { class: 'field__label', text: `Поле «${key}»` }), mapInputs[key]))),
+    );
+
+    const testArea = h('textarea', { class: 'input input--area', rows: '2', placeholder: 'Параметры для теста (JSON)' });
+    testArea.value = JSON.stringify(Object.fromEntries(draft.params.map((param) => [param.name, param.default ?? ''])), null, 2);
+    const testOut = h('pre', { class: 'node-editor__test', text: testResult ? JSON.stringify(testResult, null, 2) : '' });
+    const testButton = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Тестовый запуск' });
+    testButton.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      testButton.disabled = true;
+      try {
+        const saved = await saveDraft();
+        if (!saved) return;
+        let params = {};
+        try { params = JSON.parse(testArea.value || '{}'); } catch { params = {}; }
+        testResult = await api.testCustomNode(saved.id, params);
+        testOut.textContent = JSON.stringify(testResult, null, 2);
+        testOut.classList.toggle('is-error', !testResult.ok);
+      } catch (error) {
+        testOut.textContent = error && error.message ? error.message : 'Ошибка теста';
+        testOut.classList.add('is-error');
+      } finally {
+        busy = false;
+        testButton.disabled = false;
+      }
+    });
+
+    const saveButton = h('button', { class: 'btn btn--primary', type: 'button', text: 'Сохранить' });
+    saveButton.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      saveButton.disabled = true;
+      try {
+        const saved = await saveDraft();
+        if (saved) {
+          closeModal();
+          toast('Нода сохранена', 'ok');
+        }
+      } finally {
+        busy = false;
+        saveButton.disabled = false;
+      }
+    });
+    const cancel = h('button', { class: 'btn btn--ghost', type: 'button', text: 'Отмена' });
+    cancel.addEventListener('click', closeModal);
+
+    root.append(
+      basics, paramsSection, runtimeSection, findingsSection,
+      h('section', { class: 'node-editor__section' }, h('h3', { text: 'Проверка' }), testArea,
+        h('div', { class: 'run-detail__actions' }, testButton), testOut),
+      h('div', { class: 'node-editor__footer' }, saveButton, cancel),
+    );
+
+    async function saveDraft() {
+      if (!draft.name.trim()) {
+        toast('Укажите название ноды', 'warn');
+        return null;
+      }
+      const payload = {
+        name: draft.name.trim(),
+        kind: draft.kind,
+        icon: draft.icon,
+        color: draft.color,
+        description: draft.description,
+        inputs: draft.inputs,
+        outputs: draft.outputs,
+        params: draft.params.map((param) => ({
+          name: param.name,
+          label: param.label || param.name,
+          type: param.type || 'string',
+          default: param.default,
+          required: Boolean(param.required),
+          secret: Boolean(param.secret) || param.type === 'secret',
+          options: Array.isArray(param.options) ? param.options : [],
+        })),
+        runtime: draft.runtime,
+      };
+      try {
+        const saved = draft.id ? await api.updateCustomNode(draft.id, payload) : await api.createCustomNode(payload);
+        draft.id = saved.id;
+        draft.version = saved.version;
+        await loadCustomCatalog();
+        await openNodesView();
+        return saved;
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось сохранить ноду', 'warn');
+        return null;
+      }
+    }
+  };
+
+  mount();
+}
+
+async function openNetworkRules() {
+  let rules;
+  try {
+    rules = await api.networkRules();
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось загрузить правила', 'warn');
+    return;
+  }
+  const hosts = [...(rules.allow_hosts || [])];
+  $('#modalTitle').textContent = 'Сетевые правила';
+  const root = $('#modalBody');
+  root.replaceChildren();
+  const list = h('div', { class: 'hosts-list' });
+  const draw = () => {
+    list.replaceChildren();
+    if (!hosts.length) {
+      list.append(h('p', { class: 'field__hint', text: 'Список пуст — HTTP-ноды не смогут делать запросы.' }));
+    }
+    hosts.forEach((host, index) => {
+      const remove = h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Удалить хост' }, svgIcon('trash'));
+      remove.addEventListener('click', () => { hosts.splice(index, 1); draw(); });
+      list.append(h('div', { class: 'host-row' }, h('code', { text: host }), remove));
+    });
+  };
+  const input = h('input', { class: 'input', placeholder: 'api.example.com или *.example.com' });
+  const add = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Добавить' });
+  add.addEventListener('click', () => {
+    const value = input.value.trim().toLowerCase();
+    if (value && !hosts.includes(value)) hosts.push(value);
+    input.value = '';
+    draw();
+  });
+  const save = h('button', { class: 'btn btn--primary', type: 'button', text: 'Сохранить правила' });
+  save.addEventListener('click', async () => {
+    try {
+      await api.saveNetworkRules({ ...rules, allow_hosts: hosts });
+      closeModal();
+      toast('Сетевые правила сохранены', 'ok');
+    } catch (error) {
+      toast(error && error.message ? error.message : 'Не удалось сохранить правила', 'warn');
+    }
+  });
+  draw();
+  root.append(
+    h('p', { class: 'field__hint', text: 'HTTP-ноды могут обращаться только к этим хостам. Поддерживается *.example.com.' }),
+    h('div', { class: 'hosts-add' }, input, add),
+    list,
+    h('div', { class: 'run-detail__actions' }, save),
+  );
+  $('#modal').hidden = false;
+}
+
+/* ------------------------------------------------------------------ */
+/* композитные ноды                                                    */
+/* ------------------------------------------------------------------ */
+
+function updateCompositeButton() {
+  const button = $('#compositeBtn');
+  if (!button) return;
+  button.disabled = (state.selectedNodes || []).length === 0;
+}
+
+function openCompositeDialog() {
+  if (!state.selectedNodes.length) {
+    toast('Сначала выделите ноды, которые нужно свернуть', 'warn');
+    return;
+  }
+  $('#modalTitle').textContent = 'Свернуть в ноду';
+  const nameInput = h('input', { class: 'input', value: 'Моя композитная нода' });
+  const iconSelect = editorSelect('box', CUSTOM_ICONS, () => {}, Object.fromEntries(CUSTOM_ICONS.map((name) => [name, name])));
+  const descInput = h('textarea', { class: 'input input--area', rows: '2', placeholder: 'Что делает эта нода' });
+  const create = h('button', { class: 'btn btn--primary', type: 'button', text: 'Создать ноду' });
+  create.addEventListener('click', async () => {
+    create.disabled = true;
+    try {
+      await collapseSelection(nameInput.value.trim() || 'Композитная нода', iconSelect.value, descInput.value.trim());
+    } finally {
+      create.disabled = false;
+    }
+  });
+  const cancel = h('button', { class: 'btn btn--ghost', type: 'button', text: 'Отмена' });
+  cancel.addEventListener('click', closeModal);
+  $('#modalBody').replaceChildren(
+    h('p', { class: 'field__hint', text: 'Выделенные ноды станут одной нодой. Границы станут её портами; внутренние параметры сохранятся.' }),
+    h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Название' }), nameInput),
+    h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Иконка' }), iconSelect),
+    h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Описание' }), descInput),
+    h('div', { class: 'run-detail__actions' }, create, cancel),
+  );
+  $('#modal').hidden = false;
+}
+
+async function collapseSelection(name, icon, description) {
+  const selected = new Set(state.selectedNodes || []);
+  const innerNodes = state.workflow.nodes.filter((node) => selected.has(node.id));
+  if (!innerNodes.length) return;
+  const innerEdges = state.workflow.edges.filter((edge) => selected.has(edge.from.node) && selected.has(edge.to.node));
+  const incoming = state.workflow.edges.filter((edge) => !selected.has(edge.from.node) && selected.has(edge.to.node));
+  const outgoing = state.workflow.edges.filter((edge) => selected.has(edge.from.node) && !selected.has(edge.to.node));
+  const inputs = incoming.map((edge, index) => ({
+    id: `in${index + 1}`,
+    label: edge.to.port || 'in',
+    kind: 'exec',
+    inner: { node: edge.to.node, port: edge.to.port || 'in' },
+  }));
+  const outputs = outgoing.map((edge, index) => ({
+    id: `out${index + 1}`,
+    label: edge.from.port || 'out',
+    kind: 'exec',
+    inner: { node: edge.from.node, port: edge.from.port || 'out' },
+  }));
+  const backend = api.toBackendGraph({ nodes: innerNodes, edges: innerEdges });
+  try {
+    const definition = await api.createCustomNode({
+      name,
+      kind: 'composite',
+      icon,
+      description,
+      inputs,
+      outputs,
+      runtime: { graph: backend },
+    });
+    state.customNodes = [definition, ...(state.customNodes || [])];
+    const x = Math.round(innerNodes.reduce((sum, node) => sum + (Number(node.x) || 0), 0) / innerNodes.length);
+    const y = Math.round(innerNodes.reduce((sum, node) => sum + (Number(node.y) || 0), 0) / innerNodes.length);
+    const compositeNode = { id: 'n-' + Math.random().toString(36).slice(2, 9), type: definition.id, x, y, params: {} };
+    const newNodes = state.workflow.nodes.filter((node) => !selected.has(node.id)).concat(compositeNode);
+    const newEdges = state.workflow.edges.filter((edge) => !selected.has(edge.from.node) && !selected.has(edge.to.node));
+    incoming.forEach((edge, index) => newEdges.push({ ...edge, to: { node: compositeNode.id, port: inputs[index].id } }));
+    outgoing.forEach((edge, index) => newEdges.push({ ...edge, from: { node: compositeNode.id, port: outputs[index].id } }));
+    state.workflow = { ...state.workflow, nodes: newNodes, edges: newEdges };
+    await loadCustomCatalog();
+    closeModal();
+    renderAll();
+    saveWorkflow();
+    selectMany([compositeNode.id]);
+    toast('Композитная нода создана', 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось создать композитную ноду', 'warn');
+  }
+}
+
+async function openCompositeEditor(nodeType) {
+  if (state.compositeEdit) {
+    toast('Сначала сохраните или отмените текущее редактирование', 'warn');
+    return;
+  }
+  try {
+    const definition = await api.customNode(nodeType);
+    if (definition.kind !== 'composite') return toast('Это не композитная нода', 'warn');
+    state.compositeEdit = { definition, original: clone(state.workflow) };
+    const inner = api.fromBackendWorkflow({ id: 'composite-edit', name: definition.name, graph: definition.runtime.graph || { nodes: [], edges: [] } });
+    state.workflow = { ...inner, id: state.workflow.id };
+    state.selectedNode = null;
+    state.selectedNodes = [];
+    state.selectedEdge = null;
+    $('#compositeBannerTitle').textContent = `Редактирование: ${definition.name}`;
+    $('#compositeBanner').hidden = false;
+    showWorkspace('graph');
+    renderAll();
+    fitView();
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось открыть композитную ноду', 'warn');
+  }
+}
+
+async function saveCompositeEdit() {
+  const context = state.compositeEdit;
+  if (!context) return;
+  const backend = api.toBackendGraph(state.workflow);
+  try {
+    await api.updateCustomNode(context.definition.id, {
+      ...context.definition,
+      runtime: { ...context.definition.runtime, graph: backend },
+    });
+    state.compositeEdit = null;
+    state.workflow = context.original;
+    $('#compositeBanner').hidden = true;
+    await loadCustomCatalog();
+    renderAll();
+    saveWorkflow();
+    toast('Композитная нода обновлена', 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось сохранить композитную ноду', 'warn');
+  }
+}
+
+function cancelCompositeEdit() {
+  if (!state.compositeEdit) return;
+  state.workflow = state.compositeEdit.original;
+  state.compositeEdit = null;
+  $('#compositeBanner').hidden = true;
+  renderAll();
+}
+
 function showWorkspace(view) {
   state.workspaceView = view;
   const isGraph = view === 'graph';
   const isPresets = view === 'presets';
   const isLibrary = view === 'library';
   const isRuns = view === 'runs';
+  const isNodes = view === 'nodes';
   $('#graphLayout').hidden = !isGraph;
   $('#presetsView').hidden = !isPresets;
   $('#libraryView').hidden = !isLibrary;
   $('#runsView').hidden = !isRuns;
+  $('#nodesView').hidden = !isNodes;
   for (const tab of $$('#workspaceTabs .workspace-tab')) {
     tab.classList.toggle('is-active', tab.dataset.workspace === view);
   }
@@ -1143,6 +1821,7 @@ function showWorkspace(view) {
   if (isLibrary) openLibraryView();
   if (isRuns) openRunsView();
   else stopRunsPolling();
+  if (isNodes) openNodesView();
   if (!isGraph) clearSelection();
 }
 
@@ -1354,6 +2033,7 @@ function syncSelection() {
     el.classList.toggle('is-selected', selected);
     el.classList.toggle('is-multi-selected', selected && state.selectedNodes.length > 1);
   }
+  updateCompositeButton();
 }
 
 function selectNode(id, additive = false) {
@@ -1391,6 +2071,7 @@ function selectEdge(id) {
   state.selectedNodes = [];
   closeInspector();
   for (const el of $$('.node')) el.classList.remove('is-selected', 'is-multi-selected');
+  updateCompositeButton();
   for (const g of $$('.wire')) g.classList.toggle('is-selected', g.dataset.id === id);
 }
 
@@ -1630,6 +2311,23 @@ function renderInspector() {
     body.append(h('p', { class: 'field__hint' }, 'Планировщик выключен на сервере: задайте LDWARDEN_ENABLE_SCHEDULER=true в .env.'));
   }
   body.append(renderNodeColor(node));
+  if (api.isRemote && String(node.type || '').startsWith('custom-')) {
+    const edit = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Редактировать ноду' });
+    edit.addEventListener('click', async () => {
+      try {
+        openCustomNodeEditor(await api.customNode(node.type));
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось открыть ноду', 'warn');
+      }
+    });
+    body.append(h('div', { class: 'field' }, edit));
+    const definition = (state.customNodes || []).find((item) => item.id === node.type);
+    if (definition && definition.kind === 'composite') {
+      const openCanvas = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Открыть композитный холст' });
+      openCanvas.addEventListener('click', () => openCompositeEditor(node.type));
+      body.append(h('div', { class: 'field' }, openCanvas));
+    }
+  }
   if (api.isRemote && node.type === 'trigger.schedule') {
     body.append(renderScheduleCheck(node));
   }
@@ -2701,15 +3399,45 @@ function renderLibraryPage() {
     return;
   }
   const query = state.libraryQuery.trim().toLowerCase();
-  const items = state.libraryItems.filter((item) => {
+  const filter = state.libraryFilter || 'all';
+  const items = (data.items || []).filter((item) => {
+    if (filter === 'nodes') return false;
     if (!query) return true;
     return `${item.name || ''} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(query);
   });
-  if (!items.length) {
+  const nodeItems = (data.nodes || []).filter((item) => {
+    if (filter === 'presets') return false;
+    if (!query) return true;
+    return `${item.name || ''} ${item.description || ''} ${item.kind || ''}`.toLowerCase().includes(query);
+  });
+  const total = filter === 'presets' ? items.length : filter === 'nodes' ? nodeItems.length : items.length + nodeItems.length;
+  const setCounts = () => {
+    const labels = { all: `Все (${(data.items || []).length + (data.nodes || []).length})`, presets: `Пресеты (${(data.items || []).length})`, nodes: `Ноды (${(data.nodes || []).length})` };
+    for (const el of $$('#libraryFilters .library-filter')) {
+      if (labels[el.dataset.libraryFilter]) el.textContent = labels[el.dataset.libraryFilter];
+      el.classList.toggle('is-active', el.dataset.libraryFilter === filter);
+    }
+  };
+  setCounts();
+  if (!total) {
     root.append(h('div', { class: 'workspace-empty' },
       h('h3', { text: query ? 'Ничего не найдено' : 'В библиотеке пока пусто' }),
-      h('p', { text: query ? 'Попробуйте другой запрос.' : 'Опубликуйте первый сценарий кнопкой «Опубликовать текущий».' })));
+      h('p', { text: query ? 'Попробуйте другой запрос.' : 'Опубликуйте сценарий или ноду — они появятся здесь.' })));
     return;
+  }
+  for (const item of nodeItems) {
+    const kind = item.kind === 'http' ? 'HTTP' : item.kind === 'ai' ? 'AI' : 'Композит';
+    const install = h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Установить' });
+    install.addEventListener('click', () => installLibraryNode(item));
+    root.append(h('article', { class: 'preset-card library-card' },
+      h('div', { class: 'preset-card__top' },
+        h('span', { class: 'preset-card__badge', text: 'Нода' }),
+        h('span', { class: 'preset-card__active', text: `${kind} · v${item.version || 1}` })),
+      h('h2', { class: 'preset-card__title', text: item.name || item.id }),
+      item.description ? h('p', { class: 'library-card__text', text: item.description }) : null,
+      h('div', { class: 'preset-card__actions' },
+        h('span', { class: 'field__hint', text: item.updated_at ? String(item.updated_at).slice(0, 10) : '' }),
+        install)));
   }
   for (const item of items) {
     const tags = (item.tags || []).map((tag) => h('span', { class: 'library-tag', text: tag }));
@@ -2719,6 +3447,9 @@ function renderLibraryPage() {
         item.author ? h('span', { class: 'preset-card__active', text: item.author }) : null),
       h('h2', { class: 'preset-card__title', text: item.name || 'Без названия' }),
       item.description ? h('p', { class: 'library-card__text', text: item.description }) : null,
+      Array.isArray(item.custom_nodes) && item.custom_nodes.length
+        ? h('p', { class: 'field__hint', text: `Требует своих нод: ${item.custom_nodes.length}` })
+        : null,
       tags.length ? h('div', { class: 'library-tags' }, ...tags) : null,
       h('div', { class: 'preset-card__actions' },
         h('span', { class: 'field__hint', text: item.updated_at ? String(item.updated_at).slice(0, 10) : '' }),
@@ -2728,8 +3459,25 @@ function renderLibraryPage() {
   }
 }
 
-function addLibraryPreset(item) {
+async function installLibraryNode(item) {
   try {
+    await api.libraryInstall({ custom_nodes: [{ id: item.id, path: item.path }] });
+    await loadCustomCatalog();
+    await refreshCustomNodes();
+    toast(`Нода «${item.name || item.id}» установлена`, 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось установить ноду', 'warn');
+  }
+}
+
+async function addLibraryPreset(item) {
+  try {
+    if (Array.isArray(item.custom_nodes) && item.custom_nodes.length) {
+      const installed = await api.libraryInstall({ custom_nodes: item.custom_nodes });
+      await loadCustomCatalog();
+      await refreshCustomNodes();
+      if (installed && installed.count) toast(`Установлено нод: ${installed.count}`, 'info');
+    }
     const imported = api.fromBackendWorkflow({ id: item.id, name: item.name, graph: item.graph });
     if (!imported.nodes.length) throw new Error('В пресете нет узлов');
     const baseName = String(item.name || 'Пресет из библиотеки').slice(0, 60);
@@ -2767,7 +3515,8 @@ async function publishCurrentToLibrary() {
       description,
       tags: tagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
     });
-    toast(`Опубликовано: ${result.path || name}`, 'ok');
+    const nodesNote = result.nodes_count ? ` и ${result.nodes_count} нод(ы)` : '';
+    toast(`Опубликовано: ${result.path || name}${nodesNote}`, 'ok');
     await loadLibrary(true);
     renderLibraryPage();
   } catch (error) {
@@ -2830,6 +3579,26 @@ function bindEvents() {
   $('#runBtn').addEventListener('click', startRun);
   $('#historyBtn').addEventListener('click', openModal);
   $('#runsRefreshBtn').addEventListener('click', () => loadRuns(true));
+  $('#compositeBtn').addEventListener('click', openCompositeDialog);
+  $('#compositeSaveBtn').addEventListener('click', saveCompositeEdit);
+  $('#compositeCancelBtn').addEventListener('click', cancelCompositeEdit);
+  $('#customNodeCreateBtn').addEventListener('click', () => openCustomNodeEditor(null));
+  $('#networkRulesBtn').addEventListener('click', openNetworkRules);
+  $('#customNodeImportBtn').addEventListener('click', () => $('#customNodeImportInput').click());
+  $('#customNodeImportInput').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      await api.importCustomNode(payload);
+      await loadCustomCatalog();
+      await openNodesView();
+      toast('Нода импортирована', 'ok');
+    } catch (error) {
+      toast(error && error.message ? error.message : 'Не удалось импортировать ноду', 'warn');
+    }
+  });
   $('#closeDrawer').addEventListener('click', closeDrawer);
   $('#presetCreateBtn').addEventListener('click', saveCurrentAsPreset);
   $('#presetExportBtn').addEventListener('click', exportCustomPresets);
@@ -2844,6 +3613,13 @@ function bindEvents() {
     renderPresets();
   });
   $('#libraryRefreshBtn').addEventListener('click', () => loadLibrary(true));
+  for (const filter of $$('#libraryFilters .library-filter')) {
+    filter.addEventListener('click', () => {
+      state.libraryFilter = filter.dataset.libraryFilter || 'all';
+      for (const el of $$('#libraryFilters .library-filter')) el.classList.toggle('is-active', el === filter);
+      renderLibraryPage();
+    });
+  }
   $('#libraryPublishBtn').addEventListener('click', publishCurrentToLibrary);
   $('#librarySearch').addEventListener('input', (event) => {
     state.libraryQuery = event.target.value;

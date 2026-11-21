@@ -47,6 +47,18 @@ def register_node(cls: T) -> T:
     return cls
 
 
+def register_custom(node_type: str, spec: NodeSpec, cls: type) -> None:
+    """Регистрирует динамическую ноду (созданную в интерфейсе)."""
+    NODE_SPECS[node_type] = spec
+    NODE_CLASSES[node_type] = cls
+
+
+def unregister_custom(prefix: str = "custom.") -> None:
+    for key in [key for key in NODE_SPECS if key.startswith(prefix)]:
+        NODE_SPECS.pop(key, None)
+        NODE_CLASSES.pop(key, None)
+
+
 def get_spec(node_type: str) -> NodeSpec | None:
     return NODE_SPECS.get(node_type)
 
@@ -65,6 +77,7 @@ def catalog() -> list[dict]:
         "report",
         "notification",
         "control",
+        "custom",
     ]
     specs = sorted(
         NODE_SPECS.values(),

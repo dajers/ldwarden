@@ -240,6 +240,23 @@ class ScheduleStateRow(BaseModel):
         indexes = ((("workflow_id", "node_id"), True),)
 
 
+class CustomNodeRow(BaseModel):
+    id = CharField(primary_key=True)
+    name = CharField()
+    kind = CharField(default="http")
+    version = IntegerField(default=1)
+    spec = TextField(default="{}")
+    runtime = TextField(default="{}")
+    created_at = DateTimeField(default=utcnow)
+    updated_at = DateTimeField(default=utcnow)
+
+
+class AppSettingRow(BaseModel):
+    key = CharField(primary_key=True)
+    value = TextField(default="")
+    updated_at = DateTimeField(default=utcnow)
+
+
 class InboxMessageRow(BaseModel):
     id = AutoField()
     run_id = CharField(null=True)
@@ -273,6 +290,8 @@ MODELS = [
     TelegramLinkRow,
     ScheduleStateRow,
     InboxMessageRow,
+    CustomNodeRow,
+    AppSettingRow,
 ]
 
 

@@ -10,6 +10,7 @@ from flask_cors import CORS
 
 import app.nodes
 from app.api.common import ApiError, require_api_token
+from app.api.custom_nodes import bp as custom_nodes_bp
 from app.api.library import bp as library_bp
 from app.api.misc import bp as misc_bp
 from app.api.runs import bp as runs_bp
@@ -34,6 +35,8 @@ def create_app(settings_override: Settings | None = None) -> Flask:
     )
     settings.ensure_dirs()
     init_db(settings)
+    from app.services import custom_nodes as custom_nodes_service
+    custom_nodes_service.load_all()
 
     flask_app = Flask(__name__)
     flask_app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_bytes
@@ -58,6 +61,7 @@ def create_app(settings_override: Settings | None = None) -> Flask:
     flask_app.extensions["ldwarden_telegram"] = TelegramService(settings)
     flask_app.extensions["ldwarden_library"] = PresetLibrary(settings)
 
+    flask_app.register_blueprint(custom_nodes_bp, url_prefix="/api")
     flask_app.register_blueprint(library_bp, url_prefix="/api")
     flask_app.register_blueprint(misc_bp, url_prefix="/api")
     flask_app.register_blueprint(workflows_bp, url_prefix="/api")

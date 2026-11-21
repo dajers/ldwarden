@@ -10,9 +10,10 @@ export const CATEGORIES = {
   scan: { label: 'Проверки', color: 'var(--cat-scan)', tint: 'var(--cat-scan-tint)' },
   logic: { label: 'Логика', color: 'var(--cat-logic)', tint: 'var(--cat-logic-tint)' },
   action: { label: 'Действия', color: 'var(--cat-action)', tint: 'var(--cat-action-tint)' },
+  custom: { label: 'Мои ноды', color: '#8b5cf6', tint: '#ede9fe' },
 };
 
-export const CATEGORY_ORDER = ['trigger', 'source', 'scan', 'logic', 'action'];
+export const CATEGORY_ORDER = ['trigger', 'source', 'scan', 'logic', 'action', 'custom'];
 
 export const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 export const SEVERITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };

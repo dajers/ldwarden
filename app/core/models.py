@@ -20,7 +20,7 @@ SEVERITY_ALIASES = {
     "CRIT": "CRITICAL",
     "BLOCKER": "CRITICAL",
 }
-CATEGORIES = ["SECRET", "SAST", "SCA"]
+CATEGORIES = ["SECRET", "SAST", "SCA", "CUSTOM"]
 
 
 def normalize_severity(value: str | None, default: str = "MEDIUM") -> str:

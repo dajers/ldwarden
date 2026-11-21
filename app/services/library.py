@@ -51,6 +51,72 @@ class PresetLibrary:
         return f"{parts[0]}/{parts[1]}"
 
     @property
+    def nodes_path(self) -> str:
+        base = self.path
+        if base == "presets":
+            return "nodes"
+        if base.endswith("/presets"):
+            return base[: -len("/presets")] + "/nodes"
+        if "/" in base:
+            return base.rsplit("/", 1)[0] + "/nodes"
+        return "nodes"
+
+    def _read_json(self, path: str) -> dict:
+        response = self._request(
+            "GET",
+            f"/repos/{self.repo}/contents/{quote(path, safe='/')}",
+            params={"ref": self.branch},
+        )
+        data = response.json()
+        content = data.get("content") if isinstance(data, dict) else None
+        if not content:
+            raise LibraryError(f"Пустой файл: {path}")
+        raw = base64.b64decode(content)
+        return json.loads(raw.decode("utf-8"))
+
+    def _write_json(self, path: str, document: dict, message: str) -> str:
+        payload = {
+            "message": message,
+            "content": base64.b64encode(json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")).decode("ascii"),
+            "branch": self.branch,
+        }
+        try:
+            existing = self._request(
+                "GET",
+                f"/repos/{self.repo}/contents/{quote(path, safe='/')}",
+                params={"ref": self.branch},
+            )
+        except LibraryError as exc:
+            if "404" not in str(exc):
+                raise
+            existing = None
+        if existing is not None and existing.status_code == 200:
+            payload["sha"] = existing.json().get("sha")
+        response = self._request(
+            "PUT",
+            f"/repos/{self.repo}/contents/{quote(path, safe='/')}",
+            json=payload,
+        )
+        data = response.json()
+        return (data.get("content") or {}).get("html_url") or f"https://github.com/{self.repo}/blob/{self.branch}/{path}"
+
+    def install_nodes(self, refs: list[dict]) -> dict:
+        from app.services import custom_nodes
+
+        installed = []
+        for ref in refs or []:
+            if not isinstance(ref, dict):
+                continue
+            node_id = str(ref.get("id") or "").strip()
+            if not node_id:
+                continue
+            path = str(ref.get("path") or f"{self.nodes_path}/{node_id}.json")
+            document = self._read_json(path)
+            definition = custom_nodes.import_definition(document)
+            installed.append({"id": definition["id"], "name": definition["name"], "version": definition["version"]})
+        return {"installed": installed, "count": len(installed)}
+
+    @property
     def configured(self) -> bool:
         return bool(self.repo)
 
@@ -94,8 +160,8 @@ class PresetLibrary:
             raise LibraryError(f"GitHub API {response.status_code}: {message}")
         return response
 
-    def _directory(self) -> list[dict]:
-        target = quote(self.path, safe="/")
+    def _directory(self, path: str | None = None) -> list[dict]:
+        target = quote(path or self.path, safe="/")
         response = self._request(
             "GET",
             f"/repos/{self.repo}/contents/{target}",
@@ -137,6 +203,7 @@ class PresetLibrary:
             "path": item.get("path") or "",
             "html_url": item.get("html_url") or "",
             "graph": graph,
+            "custom_nodes": document.get("custom_nodes") if isinstance(document.get("custom_nodes"), list) else [],
         }
 
     def list_presets(self, force: bool = False) -> dict:
@@ -167,12 +234,86 @@ class PresetLibrary:
             self._cache_at = time.monotonic()
         return data
 
-    def publish(self, graph: dict, *, name: str, description: str = "", tags: list[str] | None = None, author: str = "local") -> dict:
+    def list_nodes(self, force: bool = False) -> dict:
+        if not self.configured:
+            return {**self.status(), "items": []}
+        now = time.monotonic()
+        with self._cache_lock:
+            if not force and getattr(self, "_nodes_cache", None) is not None and now - getattr(self, "_nodes_at", 0) < self.cache_ttl:
+                cached = copy.deepcopy(self._nodes_cache)
+                cached["cached"] = True
+                return cached
+        try:
+            entries = self._directory(self.nodes_path)
+        except LibraryError as exc:
+            if "404" in str(exc):
+                return {**self.status(), "items": [], "cached": False}
+            raise
+        items = []
+        for entry in entries:
+            if entry.get("type") != "file" or not str(entry.get("name", "")).endswith(".json"):
+                continue
+            try:
+                document = self._read_json(entry["path"])
+            except (LibraryError, ValueError, TypeError):
+                continue
+            if not isinstance(document, dict) or not document.get("id"):
+                continue
+            items.append(
+                {
+                    "id": str(document.get("id")),
+                    "name": str(document.get("name") or document.get("id"))[:160],
+                    "kind": str(document.get("kind") or "http"),
+                    "version": int(document.get("version") or 1),
+                    "description": str(document.get("description") or "")[:1000],
+                    "icon": str(document.get("icon") or "box"),
+                    "path": entry.get("path") or "",
+                    "html_url": entry.get("html_url") or "",
+                    "updated_at": document.get("updated_at") or entry.get("updated_at") or "",
+                }
+            )
+        items.sort(key=lambda item: item["name"].lower())
+        data = {**self.status(), "items": items, "cached": False}
+        with self._cache_lock:
+            self._nodes_cache = copy.deepcopy(data)
+            self._nodes_at = time.monotonic()
+        return data
+
+    def publish_node(self, definition: dict) -> dict:
+        if not self.configured:
+            raise LibraryError("Библиотека не настроена: задайте LDWARDEN_LIBRARY_REPO")
+        if not self.token:
+            raise LibraryError("Для публикации задайте LDWARDEN_LIBRARY_TOKEN")
+        if not isinstance(definition, dict) or not definition.get("id"):
+            raise LibraryError("Некорректное определение ноды")
+        node_path = f"{self.nodes_path}/{definition['id']}.json"
+        url = self._write_json(
+            node_path,
+            {"format": "ldwarden-node/v1", "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), **definition},
+            f"publish node: {str(definition.get('name') or definition['id'])[:120]}",
+        )
+        with self._cache_lock:
+            self._nodes_cache = None
+            self._nodes_at = 0.0
+        return {"id": definition["id"], "path": node_path, "url": url, "version": int(definition.get("version") or 1)}
+
+    def publish(self, graph: dict, *, name: str, description: str = "", tags: list[str] | None = None, author: str = "local", nodes: list[dict] | None = None) -> dict:
         if not self.configured:
             raise LibraryError("Библиотека не настроена: задайте LDWARDEN_LIBRARY_REPO")
         if not self.token:
             raise LibraryError("Для публикации задайте LDWARDEN_LIBRARY_TOKEN")
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        node_refs = []
+        node_urls = []
+        for definition in nodes or []:
+            node_path = f"{self.nodes_path}/{definition['id']}.json"
+            url = self._write_json(
+                node_path,
+                {"format": "ldwarden-node/v1", **definition},
+                f"publish node: {definition.get('name', definition['id'])[:120]}",
+            )
+            node_refs.append({"id": definition["id"], "version": definition.get("version", 1), "path": node_path})
+            node_urls.append({"id": definition["id"], "url": url, "path": node_path})
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", name.lower()).strip("-")[:48]
         digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
         safe_name = f"{slug or 'preset'}-{digest}"
@@ -186,6 +327,7 @@ class PresetLibrary:
             "author": author[:80],
             "updated_at": now,
             "graph": graph,
+            "custom_nodes": node_refs,
         }
         payload = {
             "message": f"publish preset: {name[:120]}",
@@ -218,4 +360,6 @@ class PresetLibrary:
             "url": (data.get("content") or {}).get("html_url") or f"https://github.com/{self.repo}/blob/{self.branch}/{file_path}",
             "commit": (data.get("commit") or {}).get("sha") or "",
             "preset": preset,
+            "nodes": node_urls,
+            "nodes_count": len(node_urls),
         }
