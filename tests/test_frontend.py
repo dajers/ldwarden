@@ -18,7 +18,7 @@ class FrontendServingTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
-        self.assertIn("Sakura Flow", response.data.decode("utf-8"))
+        self.assertIn("ldwarden", response.data.decode("utf-8").lower())
         self.assertIn("js/app.js", response.data.decode("utf-8"))
         response.close()
 

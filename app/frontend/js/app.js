@@ -24,7 +24,7 @@ import {
   createNode,
 } from './blocks.js';
 import { api } from './api.js';
-import { plural, summarize, toMarkdown, toOutputJson } from './engine.js';
+import { plural, summarize, toHtml, toMarkdown, toOutputJson } from './engine.js';
 import { evaluateExpression } from './expression.js';
 
 /* ------------------------------------------------------------------ */
@@ -1971,6 +1971,33 @@ function exportMarkdown() {
   toast('Отчёт выгружен', 'ok');
 }
 
+async function exportHtml() {
+  if (!state.run) return toast('Сначала запустите сценарий', 'warn');
+  if (api.isRemote && state.run.runId) {
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(state.run.runId)}/report?format=html&download=1`,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ldwarden-report.html';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('HTML-отчёт выгружен', 'ok');
+    } catch (error) {
+      toast('Не удалось получить HTML-отчёт с сервера', 'warn');
+    }
+    return;
+  }
+  download('ldwarden-report.html', toHtml(state.run.findings, { target: state.run.target }), 'text/html');
+  toast('HTML-отчёт выгружен', 'ok');
+}
+
 /* ------------------------------------------------------------------ */
 /* события интерфейса                                                  */
 /* ------------------------------------------------------------------ */
@@ -1987,6 +2014,7 @@ function bindEvents() {
   $('#closeDrawer').addEventListener('click', closeDrawer);
   $('#exportJson').addEventListener('click', exportJson);
   $('#exportMd').addEventListener('click', exportMarkdown);
+  $('#exportHtml').addEventListener('click', exportHtml);
 
   for (const tab of $$('.tab')) tab.addEventListener('click', () => setTab(tab.dataset.view));
   for (const closer of $$('[data-close-modal]')) closer.addEventListener('click', closeModal);

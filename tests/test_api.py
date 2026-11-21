@@ -185,12 +185,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse((self.settings.data_dir / "evil.txt").exists())
 
-    def test_forbidden_target(self):
+    def test_any_target_is_allowed(self):
+        import tempfile
+        from pathlib import Path
+
+        folder = Path(tempfile.mkdtemp(prefix="ldw-any-target-"))
+        (folder / "app.py").write_text('PASSWORD = "super-secret-value"\n', encoding="utf-8")
         response = self.client.post(
             "/api/workflows/tpl-full-audit/runs",
-            json={"wait": True, "target": {"kind": "path", "path": "/etc"}},
+            json={"wait": True, "target": {"kind": "path", "path": str(folder)}},
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        run = response.get_json()
+        self.assertEqual(run["status"], "success")
+        self.assertGreaterEqual((run.get("summary") or {}).get("source", {}).get("files", 0), 1)
+
+    def test_html_report(self):
+        run = self.client.post(
+            "/api/workflows/tpl-full-audit/runs", json={"wait": True}
+        ).get_json()
+        self.assertEqual(run["status"], "success")
+        response = self.client.get(f"/api/runs/{run['id']}/report?format=html")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["Content-Type"])
+        body = response.data.decode("utf-8")
+        self.assertIn("LDWarden", body)
+        self.assertIn("Отчёт о проверке безопасности", body)
 
     def test_invalid_graph(self):
         draft = self.client.post(

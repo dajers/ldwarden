@@ -11,6 +11,7 @@ def _condition_graph() -> dict:
     return {
         "nodes": [
             {"id": "t", "type": "trigger.manual", "position": {"x": 0, "y": 0}, "data": {}},
+            {"id": "src", "type": "source.target", "position": {"x": 125, "y": 0}, "data": {}},
             {"id": "scan", "type": "scan.secrets", "position": {"x": 250, "y": 0}, "data": {}},
             {
                 "id": "cond",
@@ -27,10 +28,11 @@ def _condition_graph() -> dict:
             },
         ],
         "edges": [
-            {"id": "e1", "source": "t", "target": "scan"},
-            {"id": "e2", "source": "scan", "target": "cond"},
-            {"id": "e3", "source": "cond", "target": "report", "sourceHandle": "true"},
-            {"id": "e4", "source": "cond", "target": "notify", "sourceHandle": "false"},
+            {"id": "e1", "source": "t", "target": "src"},
+            {"id": "e2", "source": "src", "target": "scan"},
+            {"id": "e3", "source": "scan", "target": "cond"},
+            {"id": "e4", "source": "cond", "target": "report", "sourceHandle": "true"},
+            {"id": "e5", "source": "cond", "target": "notify", "sourceHandle": "false"},
         ],
     }
 
@@ -78,6 +80,7 @@ class EngineTests(unittest.TestCase):
         graph = {
             "nodes": [
                 {"id": "t", "type": "trigger.manual", "position": {"x": 0, "y": 0}, "data": {}},
+                {"id": "src", "type": "source.target", "position": {"x": 125, "y": 0}, "data": {}},
                 {"id": "scan", "type": "scan.sca", "position": {"x": 250, "y": 0}, "data": {}},
                 {
                     "id": "gate",
@@ -88,10 +91,11 @@ class EngineTests(unittest.TestCase):
                 {"id": "r", "type": "report.build", "position": {"x": 750, "y": 0}, "data": {}},
             ],
             "edges": [
-                {"id": "e1", "source": "t", "target": "scan"},
-                {"id": "e2", "source": "scan", "target": "gate"},
-                {"id": "e3", "source": "gate", "target": "r", "sourceHandle": "pass"},
-                {"id": "e4", "source": "gate", "target": "r", "sourceHandle": "fail"},
+                {"id": "e1", "source": "t", "target": "src"},
+                {"id": "e2", "source": "src", "target": "scan"},
+                {"id": "e3", "source": "scan", "target": "gate"},
+                {"id": "e4", "source": "gate", "target": "r", "sourceHandle": "pass"},
+                {"id": "e5", "source": "gate", "target": "r", "sourceHandle": "fail"},
             ],
         }
         created = self.client.post("/api/workflows", json={"name": "Gate", "graph": graph}).get_json()

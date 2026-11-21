@@ -7,7 +7,9 @@ from datetime import datetime
 from flask import Blueprint, Response, jsonify, request
 
 from app.api.common import ApiError, engine, get_bool
-from app.db import FindingRow, RunEventRow, RunRow, j_loads
+from app.core.models import Finding
+from app.db import FindingRow, RunEventRow, RunRow, iso, j_loads
+from app.reports.builder import build_html
 
 bp = Blueprint("runs", __name__)
 
@@ -179,6 +181,25 @@ def run_findings(run_id: str):
     return jsonify({"items": [row.to_dict() for row in rows], "count": len(rows)})
 
 
+def _finding_from_row(row: FindingRow) -> Finding:
+    return Finding(
+        category=row.category,
+        class_name=row.class_code,
+        path=row.path,
+        line=row.line,
+        end_line=row.end_line,
+        severity=row.severity,
+        message=row.message,
+        description=row.description,
+        remediation=row.remediation,
+        cwe=row.cwe,
+        evidence=row.evidence,
+        confidence=float(row.confidence or 0.8),
+        detector=row.detector,
+        extra=j_loads(row.extra, {}),
+    )
+
+
 @bp.get("/runs/<run_id>/report")
 def run_report(run_id: str):
     run = _run_or_404(run_id)
@@ -189,8 +210,29 @@ def run_report(run_id: str):
         content, mime, ext = run.report_json, "application/json; charset=utf-8", "json"
     elif fmt == "sarif":
         content, mime, ext = run.report_sarif, "application/json; charset=utf-8", "sarif"
+    elif fmt == "html":
+        rows = list(
+            FindingRow.select().where(FindingRow.run_id == run.id).order_by(FindingRow.path, FindingRow.line)
+        )
+        content = build_html(
+            [_finding_from_row(row) for row in rows],
+            {
+                "id": run.id,
+                "workflow_name": run.workflow_name,
+                "status": run.status,
+                "trigger": run.trigger,
+                "started_at": iso(run.started_at),
+                "finished_at": iso(run.finished_at),
+                "duration_ms": run.duration_ms,
+                "source_label": run.source_label,
+            },
+            ai=j_loads(run.ai, None),
+            gate=j_loads(run.gate, None),
+            source={"label": run.source_label or run.target},
+        )
+        mime, ext = "text/html; charset=utf-8", "html"
     else:
-        raise ApiError("format должен быть md, json или sarif", 400, "invalid_format")
+        raise ApiError("format должен быть md, json, sarif или html", 400, "invalid_format")
     if not content:
         raise ApiError("Отчёт ещё не сформирован", 404, "report_not_ready")
     headers = {"Content-Type": mime}
