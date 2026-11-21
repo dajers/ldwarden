@@ -322,10 +322,7 @@ function mapParamsFromBackend(node) {
     case 'ai.analyze':
       return {
         provider: params.provider || 'auto',
-        model:
-          params.provider === 'openai' || params.provider === 'ollama'
-            ? 'GigaChat · API'
-            : 'Qwen2.5-Coder 7B · локально',
+        model: params.model === 'auto' ? '' : (params.model || ''),
         tone: 'Для разработчика',
         maxFindings: params.max_findings || 2,
         threads: params.threads || 4,
@@ -824,6 +821,15 @@ async function telegramLink(state, chatId, workflowId) {
   });
 }
 
+async function models() {
+  if (!remoteAvailable) return null;
+  try {
+    return await request('/models');
+  } catch {
+    return null;
+  }
+}
+
 async function libraryPresets(force = false) {
   return request(`/library${force ? '?refresh=1' : ''}`);
 }
@@ -849,6 +855,7 @@ export const api = {
   cancel,
   loadWorkflow,
   saveWorkflow,
+  models,
   libraryPresets,
   publishLibraryPreset,
   health,

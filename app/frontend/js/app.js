@@ -302,6 +302,8 @@ const state = {
   libraryLoading: false,
   libraryError: '',
   schedulerEnabled: null,
+  models: [],
+  modelsLoaded: false,
 };
 
 let customPresets = loadCustomPresets();
@@ -333,6 +335,12 @@ async function hydrateRemote() {
     }
     if (health && health.scheduler) {
       state.schedulerEnabled = Boolean(health.scheduler.enabled);
+    }
+    const catalog = await api.models();
+    if (catalog) {
+      state.models = Array.isArray(catalog.items) ? catalog.items : [];
+      state.modelsLoaded = true;
+      if (state.selectedNode && findNode(state.selectedNode)?.type === 'ai.explain') renderInspector();
     }
   } catch {
     /* сервер может быть недоступен — работаем локально */
@@ -437,6 +445,9 @@ function normalizeGraph(raw) {
         }
       }
       params.cron = '';
+    }
+    if (n.type === 'ai.explain' && ['Qwen2.5-Coder 7B · локально', 'Llama 3.1 8B · локально', 'GigaChat · API'].includes(params.model)) {
+      params.model = 'auto';
     }
     if (n.type === 'ai.explain' && params.timeout === 45 && params.maxFindings === 12 && params.threads === 4) {
       params.timeout = 180;
@@ -1371,8 +1382,16 @@ function renderField(node, param) {
 
   if (param.type === 'select') {
     const select = h('select', { class: 'select' });
-    for (const option of param.options) {
-      const label = param.labels && param.labels[option] ? param.labels[option] : option;
+    let options = [...(param.options || [])];
+    let labels = { ...(param.labels || {}) };
+    if (param.dynamicOptions === 'models') {
+      const models = state.models || [];
+      options = ['auto', ...models.map((model) => model.id)];
+      labels = { auto: 'auto (из .env)', ...Object.fromEntries(models.map((model) => [model.id, model.name || model.filename || model.id])) };
+    }
+    if (value && !options.includes(String(value))) options.push(String(value));
+    for (const option of options) {
+      const label = labels[option] ? labels[option] : option;
       const optionEl = h('option', { value: option, text: label });
       if (String(option) === String(value)) optionEl.selected = true;
       select.append(optionEl);
@@ -1382,6 +1401,9 @@ function renderField(node, param) {
       if (node.type === 'trigger.schedule') renderInspector();
     });
     wrap.append(select);
+    if (param.dynamicOptions === 'models' && state.modelsLoaded && !state.models.length) {
+      wrap.append(h('p', { class: 'field__hint', text: 'В папке llms нет .gguf-файлов.' }));
+    }
   } else {
     const input = h('input', {
       class: 'input',

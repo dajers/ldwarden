@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from app.ai.providers import (
     FakeProvider,
@@ -86,6 +87,20 @@ class AIAnalyzeNode(BaseNode):
         "неподтверждённые CVE/GHSA удаляются."
     )
 
+    @staticmethod
+    def _local_model_path(settings, override: str) -> str:
+        value = str(override or "").strip()
+        if not value or value == "auto":
+            return str(settings.llm_model_path)
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = settings.llm_models_dir / path
+        if path.exists():
+            return str(path)
+        if path.suffix.lower() != ".gguf":
+            return str(settings.llm_model_path)
+        return str(path)
+
     def execute(self, ctx, params: dict) -> NodeResult:
         settings = ctx.settings
         provider_name = (params.get("provider") or "auto").lower()
@@ -94,14 +109,17 @@ class AIAnalyzeNode(BaseNode):
         if provider_name == "auto":
             if settings.effective_llm_provider == "local":
                 provider = get_local_provider(
-                    str(settings.llm_model_path), n_ctx=settings.llm_n_ctx, n_threads=threads
+                    self._local_model_path(settings, model_override),
+                    n_ctx=settings.llm_n_ctx,
+                    n_threads=threads,
                 )
             else:
                 provider = build_provider(settings)
         elif provider_name == "local":
-            model_path = model_override or str(settings.llm_model_path)
             provider = get_local_provider(
-                model_path, n_ctx=settings.llm_n_ctx, n_threads=threads
+                self._local_model_path(settings, model_override),
+                n_ctx=settings.llm_n_ctx,
+                n_threads=threads,
             )
         elif provider_name in {"openai", "ollama"}:
             base_url = settings.llm_base_url

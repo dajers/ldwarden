@@ -73,6 +73,7 @@ class Settings:
 
 
     llm_provider: str = "auto"
+    llm_models_dir: Path = BASE_DIR / "llms"
     llm_model_path: Path = BASE_DIR / "llms" / "qwen2.5-coder-7b-instruct-q4_k_m.gguf"
     llm_base_url: str = ""
     llm_api_key: str = ""
@@ -120,6 +121,7 @@ class Settings:
         self.vulnerability_db_path = Path(self.vulnerability_db_path).expanduser().resolve()
         self.workflow_templates_dir = Path(self.workflow_templates_dir).expanduser().resolve()
         self.frontend_dir = Path(self.frontend_dir).expanduser().resolve()
+        self.llm_models_dir = Path(self.llm_models_dir).expanduser().resolve()
         self.llm_model_path = Path(self.llm_model_path).expanduser().resolve()
         if not self.allowed_roots:
             self.allowed_roots = [
@@ -181,6 +183,7 @@ class Settings:
             "allowed_roots": [str(p) for p in self.allowed_roots],
             "llm": {
                 "provider": self.effective_llm_provider,
+                "models_dir": str(self.llm_models_dir),
                 "model_path": str(self.llm_model_path),
                 "model": self.llm_model,
                 "base_url": self.llm_base_url,
@@ -246,6 +249,9 @@ def load_settings(overrides: dict | None = None) -> Settings:
         max_zip_entries=_int("LDWARDEN_MAX_ZIP_ENTRIES", 5_000),
         max_zip_uncompressed=_int("LDWARDEN_MAX_ZIP_UNCOMPRESSED", 200 * 1024 * 1024),
         llm_provider=_str("LDWARDEN_LLM_PROVIDER", "auto").lower(),
+        llm_models_dir=Path(
+            _str("LDWARDEN_LLM_MODELS_DIR", str(BASE_DIR / "llms"))
+        ),
         llm_model_path=Path(
             _str(
                 "LDWARDEN_LLM_MODEL_PATH",

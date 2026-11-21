@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import uuid
+from datetime import datetime, timezone
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -111,6 +112,7 @@ def meta():
             "auth_required": bool(settings_.api_token),
             "endpoints": {
                 "nodes": "/api/nodes",
+                "models": "/api/models",
                 "workflows": "/api/workflows",
                 "runs": "/api/runs",
                 "templates": "/api/templates",
@@ -152,6 +154,31 @@ def node_detail(node_type: str):
     if spec is None:
         raise ApiError("Тип ноды не найден", 404, "not_found")
     return jsonify(spec.to_dict())
+
+
+@bp.get("/models")
+def models():
+    settings_ = settings()
+    root = settings_.llm_models_dir
+    items = []
+    if root.exists():
+        for path in sorted(root.rglob("*.gguf"), key=lambda item: str(item).lower()):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            relative = path.relative_to(root).as_posix()
+            items.append(
+                {
+                    "id": relative,
+                    "name": path.stem,
+                    "filename": path.name,
+                    "size_bytes": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "active": path.resolve() == settings_.llm_model_path,
+                }
+            )
+    return jsonify({"items": items, "count": len(items), "directory": str(root)})
 
 
 @bp.post("/sources")

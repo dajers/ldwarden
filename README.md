@@ -108,7 +108,7 @@ training-main/         учебный проект и эталон находо�
   `llama-cpp-python` или не найдена модель. Для локальной Qwen установите
   `./scripts/setup-ai.sh` (или `./venv/bin/pip install -r requirements-ai.txt`);
   после этого проверьте статус `GET /api/health` — `llm.ready` должен быть `true`.
-  Путь к GGUF задаётся в `.env`: `LDWARDEN_LLM_MODEL_PATH=/абсолютный/путь/model.gguf`.
+  Список моделей в ноде AI берётся из `LDWARDEN_LLM_MODELS_DIR` (по умолчанию `llms/`); путь по умолчанию задаётся в `.env`: `LDWARDEN_LLM_MODEL_PATH=/абсолютный/путь/model.gguf`.
 - Локальная 7B на CPU может отвечать 1–3 минуты; по умолчанию AI обрабатывает
   2 находки, остальные объясняет fallback. Если ответ не успел за таймаут,
   в результате AI будет указана причина.
