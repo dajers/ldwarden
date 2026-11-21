@@ -18,4 +18,4 @@ curl -s -X POST http://127.0.0.1:8000/api/workflows \
   --data-binary @samples/full-audit.workflow.json | python -m json.tool
 ```
 
-Секретов в примерах нет; токены Telegram/SMTP добавляются в настройках ноды и шифруются backend'ом.
+Секретов в примерах нет; токены Telegram добавляются в настройках ноды и шифруются backend'ом.

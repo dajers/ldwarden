@@ -240,8 +240,6 @@ def validate_graph(graph: Any) -> dict:
                 errors.append(f"Нода {node['id']}: для webhook нужен URL")
             if params.get("channel") == "telegram" and not (params.get("chat_id") and params.get("bot_token")):
                 warnings.append(f"Нода {node['id']}: Telegram не настроен (нет chat_id/bot_token)")
-            if params.get("channel") == "smtp" and not (params.get("to") and params.get("host")):
-                warnings.append(f"Нода {node['id']}: SMTP не настроен (нет host/to)")
 
     reachable = set()
     if triggers:

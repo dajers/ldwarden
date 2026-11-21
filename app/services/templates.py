@@ -40,11 +40,11 @@ def _full_audit_graph() -> dict:
                 _node("report", "report.build", 1240, 280, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.email",
+                    "notify.webhook",
                     1540,
                     280,
-                    "Email",
-                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
+                    "Уведомление",
+                    {"url": "local://inbox", "attach_report": True},
                 ),
             ],
             "edges": [
@@ -73,11 +73,11 @@ def _secrets_only_graph() -> dict:
                 _node("report", "report.build", 1220, 200, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.email",
+                    "notify.webhook",
                     1520,
                     200,
-                    "Email",
-                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
+                    "Уведомление",
+                    {"url": "local://inbox", "attach_report": True},
                 ),
             ],
             "edges": [
@@ -163,11 +163,11 @@ def _daily_graph() -> dict:
                 _node("report", "report.build", 1240, 280, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.email",
+                    "notify.webhook",
                     1540,
                     280,
-                    "Email",
-                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
+                    "Уведомление",
+                    {"url": "local://inbox", "attach_report": True},
                 ),
             ],
             "edges": [
@@ -212,11 +212,11 @@ def _quick_smoke_graph() -> dict:
                 ),
                 _node(
                     "notify",
-                    "notify.email",
+                    "notify.webhook",
                     1540,
                     280,
-                    "Email",
-                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
+                    "Уведомление",
+                    {"url": "local://inbox", "attach_report": True},
                 ),
             ],
             "edges": [
@@ -241,7 +241,7 @@ BUILTIN_TEMPLATES: list[dict] = [
         "name": "Полный аудит перед мержем",
         "description": (
             "Три собственных анализатора (секреты, SCA, SAST) в независимых ветках, AI-объяснение, "
-            "Markdown/JSON/SARIF и email-уведомление в dry-run."
+            "Markdown/JSON/SARIF и уведомление в демо-ящик."
         ),
         "tags": ["full", "audit", "ai"],
         "graph": _full_audit_graph,
@@ -249,7 +249,7 @@ BUILTIN_TEMPLATES: list[dict] = [
     {
         "id": "tpl-secrets-only",
         "name": "Только секреты",
-        "description": "Быстрый поиск паролей, API-ключей, токенов и приватных ключей с AI-рекомендациями и email dry-run.",
+        "description": "Быстрый поиск паролей, API-ключей, токенов и приватных ключей с AI-рекомендациями и демо-уведомлением.",
         "tags": ["secrets", "fast"],
         "graph": _secrets_only_graph,
     },
@@ -266,7 +266,7 @@ BUILTIN_TEMPLATES: list[dict] = [
     {
         "id": "tpl-daily-audit",
         "name": "Ежедневный аудит в 14:00",
-        "description": "Запуск по расписанию каждый день в 14:00 UTC, полный отчёт и email dry-run.",
+        "description": "Запуск по расписанию каждый день в 14:00 UTC, полный отчёт и уведомление в демо-ящик.",
         "tags": ["schedule", "daily"],
         "graph": _daily_graph,
     },

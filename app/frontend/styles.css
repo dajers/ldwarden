@@ -1055,3 +1055,13 @@ body, .topbar, .panel, .node, .node__head, .drawer, .modal__card, .inspector, .p
 }
 .ai-warning b { display: block; margin-bottom: 3px; color: var(--warn); }
 .ai-warning p { margin: 0; line-height: 1.45; }
+
+/* ---------- подключение Telegram ---------- */
+.tg-steps { margin: 0 0 14px 18px; padding: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); }
+.tg-steps li { margin-bottom: 4px; }
+.tg-steps a { color: var(--rose-ink); }
+.tg-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tg-status { min-height: 16px; }
+.tg-status.is-error { color: var(--bad); }
+.tg-chats { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+

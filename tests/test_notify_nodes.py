@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from app.db import close_db
+from unittest.mock import patch
+
 from tests.helpers import make_app
 
 
@@ -35,10 +37,37 @@ class SeparateNotifyNodesTests(unittest.TestCase):
         self.assertEqual(run["status"], "success")
         return run["summary"]["notification"]
 
-    def test_email_dry_run(self):
-        notification = self._run("notify.email", {"password": "secret", "dry_run": True})
-        self.assertEqual(notification["channel"], "smtp")
-        self.assertEqual(notification["status"], "skipped")
+    def test_telegram_attaches_html_report(self):
+        sent: dict = {}
+
+        class DocumentClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, data=None, files=None, json=None):
+                sent["url"] = url
+                sent["data"] = data or {}
+                sent["files"] = files or {}
+                return type("Response", (), {"status_code": 200, "raise_for_status": lambda self: None})()
+
+        with patch("httpx.Client", DocumentClient):
+            notification = self._run(
+                "notify.telegram",
+                {"bot_token": "123:ABC", "chat_id": "42", "attach_report": True},
+            )
+        self.assertEqual(notification["status"], "sent")
+        self.assertIn("sendDocument", sent["url"])
+        name, content, mime = sent["files"]["document"]
+        self.assertEqual(name, "ldwarden-report.html")
+        self.assertEqual(mime, "text/html")
+        self.assertIn(b"<!doctype html>", content)
+        self.assertIn("находок", sent["data"]["caption"])
 
     def test_telegram_dry_run(self):
         notification = self._run(

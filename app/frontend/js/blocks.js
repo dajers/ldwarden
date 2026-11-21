@@ -300,31 +300,6 @@ export const NODE_TYPES = {
       { key: 'timeout', label: 'Таймаут, сек', type: 'number', def: 180, hint: 'После таймаута — fallback без зависания.' },
     ],
   },
-  'notify.email': {
-    cat: 'action',
-    icon: 'send',
-    title: 'Email',
-    sub: (p) => p.toAddr || 'получатель не задан',
-    inputs: [
-      { id: 'in', kind: 'exec', label: 'Вход' },
-      { id: 'payload', kind: 'data', label: 'данные' },
-    ],
-    outputs: [{ id: 'out', kind: 'exec', label: 'Отправлено' }],
-    params: [
-      { key: 'host', label: 'SMTP-хост', type: 'text', def: 'smtp.yandex.ru' },
-      { key: 'port', label: 'Порт', type: 'number', def: 587 },
-      { key: 'username', label: 'Логин', type: 'text', def: '' },
-      { key: 'password', label: 'Пароль приложения', type: 'secret', def: '', hint: 'Шифруется на сервере и маскируется в интерфейсе.' },
-      { key: 'fromAddr', label: 'От кого', type: 'text', def: '' },
-      { key: 'toAddr', label: 'Кому', type: 'text', def: '', hint: 'Можно несколько адресов через запятую.' },
-      { key: 'useTls', label: 'STARTTLS', type: 'toggle', def: true },
-      { key: 'useSsl', label: 'SMTPS (SSL)', type: 'toggle', def: false },
-      { key: 'subject', label: 'Тема', type: 'text', def: 'LDWarden: отчёт о проверке' },
-      { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
-      { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },
-      { key: 'failOnError', label: 'Ошибка доставки валит run', type: 'toggle', def: false },
-    ],
-  },
   'notify.telegram': {
     cat: 'action',
     icon: 'send',
@@ -466,7 +441,7 @@ export const PRESETS = [
       const trigger = createNode('trigger.schedule', 80, 240);
       const repo = createNode('source.repo', 380, 240);
       const secret = createNode('scan.secret', 680, 240);
-      const notify = createNode('notify.email', 980, 240, { dryRun: true });
+      const notify = createNode('notify.webhook', 980, 240, { url: 'local://inbox' });
       const edges = [
         connect(trigger, 'out', repo, 'in'),
         connect(repo, 'out', secret, 'in'),
@@ -550,7 +525,7 @@ export const PRESETS = [
       const sast = createNode('scan.sast', 640, 540);
       const ai = createNode('ai.explain', 940, 360);
       const branch = createNode('logic.branch', 1220, 360);
-      const notify = createNode('notify.email', 1500, 260, { dryRun: true });
+      const notify = createNode('notify.webhook', 1500, 260, { url: 'local://inbox' });
       const report = createNode('report.build', 1500, 480);
       const edges = [
         connect(trigger, 'out', repo, 'in'),

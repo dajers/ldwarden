@@ -62,8 +62,6 @@ def heuristic_workflow(prompt: str, source_hint: str = "") -> dict:
 
     if _has(prompt, "telegram", "телеграм"):
         notify_params = {"channel": "telegram", "dry_run": False}
-    elif _has(prompt, "почт", "email", "smtp", "письм"):
-        notify_params = {"channel": "smtp", "dry_run": False}
     elif _has(prompt, "webhook", "вебхук", "http"):
         notify_params = {"channel": "webhook", "url": "local://inbox", "dry_run": False}
     else:

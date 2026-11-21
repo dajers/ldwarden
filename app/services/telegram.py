@@ -29,11 +29,12 @@ class TelegramService:
     def token(self) -> str:
         return self.settings.telegram_bot_token
 
-    def connect(self) -> dict:
-        if not self.token:
-            raise TelegramError("Не задан LDWARDEN_TELEGRAM_BOT_TOKEN", 400)
+    def connect(self, bot_token: str | None = None) -> dict:
+        token = str(bot_token or "").strip() or self.token
+        if not token:
+            raise TelegramError("Укажите токен бота от @BotFather или задайте LDWARDEN_TELEGRAM_BOT_TOKEN", 400)
         self._cleanup()
-        me = self._api("getMe", {})
+        me = self._api("getMe", {}, token=token)
         bot = me.get("result") or {}
         username = str(bot.get("username") or "")
         if not username:
@@ -44,6 +45,7 @@ class TelegramService:
             "offset": None,
             "chats": {},
             "bot_username": username,
+            "token": token,
         }
         if len(self._states) > self.MAX_STATES:
             oldest = min(self._states, key=lambda key: self._states[key]["created_at"])
@@ -64,7 +66,7 @@ class TelegramService:
         payload: dict[str, Any] = {"timeout": 0, "allowed_updates": ["message"]}
         if entry["offset"] is not None:
             payload["offset"] = entry["offset"]
-        data = self._api("getUpdates", payload)
+        data = self._api("getUpdates", payload, token=entry.get("token"))
         updates = data.get("result") or []
         if not isinstance(updates, list):
             updates = []
@@ -216,16 +218,17 @@ class TelegramService:
         for state in expired:
             self._states.pop(state, None)
 
-    def _api(self, method: str, payload: dict) -> dict:
-        if not self.token:
-            raise TelegramError("Не задан LDWARDEN_TELEGRAM_BOT_TOKEN", 400)
-        url = f"https://api.telegram.org/bot{self.token}/{method}"
+    def _api(self, method: str, payload: dict, token: str | None = None) -> dict:
+        active = str(token or "").strip() or self.token
+        if not active:
+            raise TelegramError("Укажите токен бота от @BotFather или задайте LDWARDEN_TELEGRAM_BOT_TOKEN", 400)
+        url = f"https://api.telegram.org/bot{active}/{method}"
         try:
             with httpx.Client(timeout=20) as client:
                 response = client.post(url, json=payload)
             data = response.json()
         except Exception as exc:
-            raise TelegramError(f"Ошибка Telegram API: {self._safe_error(exc)}", 502) from exc
+            raise TelegramError(f"Ошибка Telegram API: {self._safe_error(exc, active)}", 502) from exc
         if not isinstance(data, dict) or not data.get("ok"):
             description = str((data or {}).get("description") or "Telegram API error")
             lower = description.lower()
@@ -239,9 +242,9 @@ class TelegramService:
             raise TelegramError(f"Telegram API: {description}", 502)
         return data
 
-    def _safe_error(self, exc: Exception) -> str:
+    def _safe_error(self, exc: Exception, token: str | None = None) -> str:
         text = str(exc)
-        if self.token:
-            text = text.replace(self.token, "***")
+        for secret in filter(None, [token, self.token]):
+            text = text.replace(secret, "***")
         text = re.sub(r"//[^/@\s]+@", "//***@", text)
         return text[:500]

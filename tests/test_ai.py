@@ -113,7 +113,7 @@ class AIServiceTests(unittest.TestCase):
         schedule = next(node for node in result["graph"]["nodes"] if node["type"] == "trigger.schedule")
         self.assertEqual(schedule["data"]["params"]["cron"], "0 14 * * *")
         notify = next(node for node in result["graph"]["nodes"] if node["type"] == "notify.send")
-        self.assertEqual(notify["data"]["params"]["channel"], "smtp")
+        self.assertEqual(notify["data"]["params"]["channel"], "webhook")
 
     def test_heuristic_ci_workflow(self):
         service = AIService(self.settings, provider=NullProvider())

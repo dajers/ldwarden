@@ -17,7 +17,6 @@ const TYPE_TO_BACKEND = {
   'ai.explain': 'ai.analyze',
   'logic.branch': 'logic.if',
   'control.gate': 'control.severity_gate',
-  'notify.email': 'notify.email',
   'notify.telegram': 'notify.telegram',
   'notify.webhook': 'notify.webhook',
 };
@@ -29,12 +28,10 @@ const TYPE_FROM_BACKEND = Object.fromEntries(
 const CHANNEL_TO_BACKEND = {
   Telegram: 'telegram',
   'HTTP webhook': 'webhook',
-  'E-mail': 'smtp',
 };
 const CHANNEL_FROM_BACKEND = {
   telegram: 'Telegram',
   webhook: 'HTTP webhook',
-  smtp: 'E-mail',
 };
 
 const FIELD_TO_BACKEND = {
@@ -214,21 +211,6 @@ function mapParamsToBackend(node) {
         threads: Number(params.threads) || 4,
         timeout: Number(params.timeout) || 180,
       };
-    case 'notify.email':
-      return {
-        host: params.host || '',
-        port: Number(params.port) || 587,
-        username: params.username || '',
-        password: params.password || '',
-        from_addr: params.fromAddr || '',
-        to_addr: params.toAddr || '',
-        use_tls: params.useTls !== false,
-        use_ssl: Boolean(params.useSsl),
-        subject: params.subject || 'LDWarden: отчёт о проверке',
-        attach_report: params.attachReport !== false,
-        dry_run: Boolean(params.dryRun),
-        fail_on_error: Boolean(params.failOnError),
-      };
     case 'notify.telegram':
       return {
         bot_token: params.botToken || '',
@@ -260,14 +242,7 @@ function mapParamsToBackend(node) {
       if (channel === 'telegram') {
         return { ...base, bot_token: params.token || '', chat_id: params.chatId || '' };
       }
-      if (channel === 'webhook') {
-        return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
-      }
-      return {
-        ...base,
-        password: params.token || '',
-        to_addr: params.chatId || '',
-      };
+      return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
     }
     case 'report.build':
       return { formats: FORMATS_FROM_LABEL[params.formats] || ['md', 'json'] };
@@ -331,21 +306,6 @@ function mapParamsFromBackend(node) {
           ? { maxFindings: 2, threads: 4, timeout: 180 }
           : {}),
       };
-    case 'notify.email':
-      return {
-        host: params.host || '',
-        port: params.port || 587,
-        username: params.username || '',
-        password: params.password || '',
-        fromAddr: params.from_addr || params.username || '',
-        toAddr: params.to_addr || '',
-        useTls: params.use_tls !== false,
-        useSsl: Boolean(params.use_ssl),
-        subject: params.subject || 'LDWarden: отчёт о проверке',
-        attachReport: params.attach_report !== false,
-        dryRun: Boolean(params.dry_run),
-        failOnError: Boolean(params.fail_on_error),
-      };
     case 'notify.telegram':
       return {
         botToken: params.bot_token || '',
@@ -369,7 +329,6 @@ function mapParamsFromBackend(node) {
       const channel = CHANNEL_FROM_BACKEND[params.channel] || 'Telegram';
       let token = '';
       if (params.channel === 'webhook') token = params.url || '';
-      else if (params.channel === 'smtp') token = params.password || '';
       else token = params.bot_token || '';
       return {
         channel,
@@ -395,7 +354,7 @@ function execPort(port) {
 
 export function toBackendGraph(workflow) {
   const nodes = (workflow.nodes || [])
-    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || ['scan.sca', 'scan.sast', 'notify.email', 'notify.telegram', 'notify.webhook', 'notify.send', 'report.build'].includes(node.type))
+    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || ['scan.sca', 'scan.sast', 'notify.telegram', 'notify.webhook', 'notify.send', 'report.build'].includes(node.type))
     .map((node) => ({
       id: node.id,
       type: TYPE_TO_BACKEND[node.type] || node.type,
@@ -431,11 +390,11 @@ export function fromBackendWorkflow(row) {
     const params = node.data && node.data.params ? node.data.params : {};
     let frontType = TYPE_FROM_BACKEND[node.type] || node.type;
     if (node.type === 'notify.send') {
-      frontType = params.channel === 'telegram' ? 'notify.telegram' : params.channel === 'smtp' ? 'notify.email' : 'notify.webhook';
+      frontType = params.channel === 'telegram' ? 'notify.telegram' : 'notify.webhook';
     }
     if (
       !frontType.startsWith('trigger.') &&
-      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.email', 'notify.telegram', 'notify.webhook', 'report.build'].includes(frontType)
+      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.telegram', 'notify.webhook', 'report.build'].includes(frontType)
     ) {
       continue;
     }
@@ -818,8 +777,8 @@ async function run(workflow, handlers = {}, token = { cancelled: false }) {
   }
 }
 
-async function telegramConnect() {
-  return request('/telegram/connect', { method: 'POST' });
+async function telegramConnect(botToken = '') {
+  return request('/telegram/connect', { method: 'POST', body: { bot_token: botToken } });
 }
 
 async function telegramChats(state) {

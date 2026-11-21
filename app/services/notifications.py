@@ -4,13 +4,12 @@ import hashlib
 import hmac
 import json
 import re
-import smtplib
 from dataclasses import dataclass, field
-from email.message import EmailMessage
 from ipaddress import ip_address
 from urllib.parse import urlparse, urlunparse
 
 from app.config import Settings
+from app.services.telegram_format import split_markdown, to_telegram_markdown
 from app.db import InboxMessageRow, j_dumps
 
 SENSITIVE_HEADERS = {"authorization", "x-api-key", "cookie", "proxy-authorization"}
@@ -68,14 +67,16 @@ class NotificationService:
         body: str,
         subject: str,
         run_id: str | None = None,
+        html_report: str | None = None,
+        caption: str | None = None,
     ) -> NotificationResult:
         channel = (channel or "webhook").lower()
         if channel == "webhook":
             return self._webhook(params, body, subject, run_id)
         if channel == "telegram":
-            return self._telegram(params, body, run_id)
-        if channel == "smtp":
-            return self._smtp(params, body, subject, run_id)
+            return self._telegram(
+                params, body, run_id, html_report=html_report, caption=caption
+            )
         return NotificationResult("error", channel, message=f"Неизвестный канал: {channel}")
 
 
@@ -144,7 +145,14 @@ class NotificationService:
             )
 
 
-    def _telegram(self, params: dict, body: str, run_id: str | None) -> NotificationResult:
+    def _telegram(
+        self,
+        params: dict,
+        body: str,
+        run_id: str | None,
+        html_report: str | None = None,
+        caption: str | None = None,
+    ) -> NotificationResult:
         token = str(params.get("bot_token") or "")
         chat_id = str(params.get("chat_id") or "")
         dry_run = bool(params.get("dry_run"))
@@ -157,15 +165,56 @@ class NotificationService:
         try:
             import httpx
 
+            if html_report:
+                url = f"https://api.telegram.org/bot{token}/sendDocument"
+                files = {
+                    "document": (
+                        "ldwarden-report.html",
+                        html_report.encode("utf-8"),
+                        "text/html",
+                    )
+                }
+                data = {
+                    "chat_id": chat_id,
+                    "caption": (caption or "LDWarden: отчёт о проверке")[:1024],
+                }
+                with httpx.Client(timeout=60) as client:
+                    response = client.post(url, data=data, files=files)
+                    response.raise_for_status()
+                size_kb = max(1, round(len(html_report.encode("utf-8")) / 1024))
+                self._store_inbox(run_id, "telegram", target, "Telegram", body, {}, "sent")
+                return NotificationResult(
+                    "sent",
+                    "telegram",
+                    target,
+                    f"HTML-отчёт отправлен файлом ({size_kb} КБ)",
+                    {"status_code": response.status_code, "file": "ldwarden-report.html"},
+                )
+
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            chunks = _chunks(body, 3900)
+            chunks = split_markdown(body, 3000)
             last_status = 0
             with httpx.Client(timeout=30) as client:
                 for chunk in chunks:
-                    response = client.post(
-                        url,
-                        json={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
-                    )
+                    formatted = to_telegram_markdown(chunk)
+                    if len(formatted) > 4000:
+                        payload = {
+                            "chat_id": chat_id,
+                            "text": chunk,
+                            "disable_web_page_preview": True,
+                        }
+                    else:
+                        payload = {
+                            "chat_id": chat_id,
+                            "text": formatted,
+                            "parse_mode": "MarkdownV2",
+                            "disable_web_page_preview": True,
+                        }
+                    response = client.post(url, json=payload)
+                    if response.status_code == 400 and "parse" in str(response.text).lower():
+                        payload.pop("parse_mode", None)
+                        payload["text"] = chunk
+                        response = client.post(url, json=payload)
                     last_status = response.status_code
                     response.raise_for_status()
             self._store_inbox(run_id, "telegram", target, "Telegram", body, {}, "sent")
@@ -177,48 +226,6 @@ class NotificationService:
             return NotificationResult(
                 "error", "telegram", target, f"Ошибка Telegram: {_safe_error(exc, [token])}"
             )
-
-
-    def _smtp(self, params: dict, body: str, subject: str, run_id: str | None) -> NotificationResult:
-        host = str(params.get("host") or "")
-        port = int(params.get("port") or 587)
-        username = str(params.get("username") or "")
-        password = str(params.get("password") or "")
-        use_tls = bool(params.get("use_tls", True))
-        use_ssl = bool(params.get("use_ssl", False))
-        from_addr = str(params.get("from_addr") or username)
-        to_addr = str(params.get("to_addr") or "")
-        dry_run = bool(params.get("dry_run"))
-        target = to_addr or "smtp"
-        if dry_run:
-            self._store_inbox(run_id, "smtp", target, subject, body, {}, "dry_run")
-            return NotificationResult("skipped", "smtp", target, "Dry-run: письмо не отправлено")
-        if not host or not to_addr:
-            return NotificationResult("skipped", "smtp", target, "Не заданы host/to_addr")
-        message = EmailMessage()
-        message["Subject"] = subject
-        message["From"] = from_addr or "ldwarden@localhost"
-        message["To"] = to_addr
-        message.set_content(body)
-        try:
-            if use_ssl:
-                server = smtplib.SMTP_SSL(host, port, timeout=30)
-            else:
-                server = smtplib.SMTP(host, port, timeout=30)
-            with server:
-                if use_tls and not use_ssl:
-                    server.starttls()
-                if username and password:
-                    server.login(username, password)
-                server.send_message(message)
-            self._store_inbox(run_id, "smtp", target, subject, body, {}, "sent")
-            return NotificationResult("sent", "smtp", target, "Письмо отправлено")
-        except Exception as exc:
-            self._store_inbox(run_id, "smtp", target, subject, body, {}, "error")
-            return NotificationResult(
-                "error", "smtp", target, f"Ошибка SMTP: {_safe_error(exc, [password])}"
-            )
-
 
     def _is_blocked_host(self, hostname: str) -> bool:
         lowered = hostname.lower()
@@ -266,6 +273,3 @@ class NotificationService:
             pass
 
 
-def _chunks(text: str, size: int) -> list[str]:
-    text = text or ""
-    return [text[i : i + size] for i in range(0, max(len(text), 1), size)]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.models import HandleSpec, NodeResult, ParamSpec, severity_counts
-from app.db import TelegramLinkRow
+from app.db import TelegramLinkRow, iso
 from app.core.registry import register_node
 from app.nodes.base import BaseNode, NodeError
 from app.services.notifications import NotificationService
@@ -13,8 +13,8 @@ class NotifyNode(BaseNode):
     category = "notification"
     title = "Уведомление"
     description = (
-        "Отправляет итоговый отчёт в один канал на выбор: HTTP webhook, Telegram или SMTP. "
-        "Для демо поддерживается local://inbox."
+        "Отправляет итоговый отчёт в один канал на выбор: HTTP webhook или Telegram. "
+        "В Telegram уходит HTML-отчёт файлом. Для демо поддерживается local://inbox."
     )
     icon = "📣"
     color = "#eab308"
@@ -30,7 +30,6 @@ class NotifyNode(BaseNode):
             options=[
                 {"value": "webhook", "label": "HTTP webhook"},
                 {"value": "telegram", "label": "Telegram"},
-                {"value": "smtp", "label": "SMTP (email)"},
             ],
         ),
         ParamSpec(
@@ -84,24 +83,8 @@ class NotifyNode(BaseNode):
             default="",
             depends_on={"channel": "telegram"},
         ),
-        ParamSpec("host", "string", "SMTP хост", "", default="", depends_on={"channel": "smtp"}),
-        ParamSpec("port", "number", "SMTP порт", "", default=587, depends_on={"channel": "smtp"}),
-        ParamSpec("username", "string", "SMTP логин", "", default="", depends_on={"channel": "smtp"}),
-        ParamSpec(
-            "password",
-            "secret",
-            "SMTP пароль",
-            "",
-            default="",
-            secret=True,
-            depends_on={"channel": "smtp"},
-        ),
-        ParamSpec("use_tls", "boolean", "STARTTLS", "", default=True, depends_on={"channel": "smtp"}),
-        ParamSpec("use_ssl", "boolean", "SMTPS", "", default=False, depends_on={"channel": "smtp"}),
-        ParamSpec("from_addr", "string", "От кого", "", default="", depends_on={"channel": "smtp"}),
-        ParamSpec("to_addr", "string", "Кому", "", default="", depends_on={"channel": "smtp"}),
         ParamSpec("subject", "string", "Тема", "Тема письма/сообщения", default="LDWarden: отчёт о проверке"),
-        ParamSpec("attach_report", "boolean", "Приложить отчёт", "Markdown-отчёт целиком", default=True),
+        ParamSpec("attach_report", "boolean", "Приложить отчёт", "HTML-отчёт файлом (Telegram)", default=True),
         ParamSpec(
             "message_template",
             "text",
@@ -124,7 +107,7 @@ class NotifyNode(BaseNode):
             default=False,
         ),
     ]
-    tags = ["notification", "webhook", "telegram", "smtp"]
+    tags = ["notification", "webhook", "telegram"]
     docs = (
         "Токены и пароли шифруются в БД и маскируются в API. Для демонстрации webhook "
         "используйте local://inbox — сообщение появится в GET /api/dev/inbox."
@@ -150,6 +133,11 @@ class NotifyNode(BaseNode):
                     pass
             if not params.get("chat_id") and ctx.settings.telegram_chat_id:
                 params["chat_id"] = ctx.settings.telegram_chat_id
+        html_report = None
+        caption = None
+        if channel == "telegram" and params.get("attach_report", True):
+            html_report = self._build_html_report(ctx, counts, workflow_name)
+            caption = f"{workflow_name}: {ctx.display_status()} · находок {counts['total']}"
         service = NotificationService(ctx.settings)
         result = service.send(
             channel,
@@ -157,6 +145,8 @@ class NotifyNode(BaseNode):
             body=body,
             subject=subject,
             run_id=ctx.run_id,
+            html_report=html_report,
+            caption=caption,
         )
         ctx.vars["notification"] = result.to_dict()
         level = "error" if result.status == "error" else ("warning" if result.status == "skipped" else "info")
@@ -174,6 +164,24 @@ class NotifyNode(BaseNode):
             message=result.message or f"Канал {channel}: {result.status}",
             preview=result.to_dict(),
         )
+
+    def _build_html_report(self, ctx, counts: dict, workflow_name: str) -> str | None:
+        from app.reports.builder import build_html
+
+        source = {"label": ctx.source.label} if ctx.source else None
+        run_info = {
+            "id": ctx.run_id,
+            "workflow_name": workflow_name,
+            "status": ctx.display_status(),
+            "trigger": ctx.trigger,
+            "started_at": iso(ctx.started_at),
+            "duration_ms": ctx.duration_ms,
+            "source_label": (ctx.source.label if ctx.source else None),
+        }
+        try:
+            return build_html(ctx.findings, run_info, ai=ctx.ai_analysis, gate=ctx.gate, source=source)
+        except Exception:
+            return None
 
     def _build_body(self, ctx, params: dict, counts: dict, workflow_name: str) -> str:
         template = (params.get("message_template") or "").strip()
@@ -217,18 +225,6 @@ class _ChannelNotifyNode(NotifyNode):
         merged = dict(params)
         merged["channel"] = self.channel
         return super().execute(ctx, merged)
-
-
-@register_node
-class EmailNotifyNode(_ChannelNotifyNode):
-    type = "notify.email"
-    title = "Email"
-    description = "Отправляет отчёт на email через SMTP."
-    icon = "✉️"
-    color = "#38bdf8"
-    channel = "smtp"
-    params = _channel_params("smtp")
-    tags = ["notification", "email", "smtp"]
 
 
 @register_node

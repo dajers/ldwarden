@@ -101,4 +101,4 @@ class LibraryTests(unittest.TestCase):
     def test_notification_nodes_are_separate(self):
         items = self.client.get("/api/nodes?category=notification").get_json()["items"]
         types = {item["type"] for item in items}
-        self.assertTrue({"notify.email", "notify.telegram", "notify.webhook"} <= types)
+        self.assertTrue({"notify.telegram", "notify.webhook"} <= types)

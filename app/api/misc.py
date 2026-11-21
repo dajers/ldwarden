@@ -412,8 +412,10 @@ def inbox_list():
 
 @bp.post("/telegram/connect")
 def telegram_connect():
+    data = request.get_json(silent=True) or {}
+    token = str(data.get("bot_token") or "").strip()
     try:
-        return jsonify(telegram_service().connect())
+        return jsonify(telegram_service().connect(bot_token=token or None))
     except TelegramError as exc:
         raise ApiError(str(exc), exc.status, "telegram_error") from exc
 

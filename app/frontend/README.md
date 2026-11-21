@@ -92,8 +92,8 @@ cd /home/dajers/Documents/LDWarden
 | `ai.explain` | `ai.analyze` |
 | `logic.branch` | `logic.if` |
 | `control.gate` | `control.severity_gate` |
-| `notify.email`, `notify.telegram`, `notify.webhook` | одноимённые ноды |
-| `notify.send` (старые сценарии) | автоматически мигрирует в email/telegram/webhook |
+| `notify.telegram`, `notify.webhook` | одноимённые ноды |
+| `notify.send` (старые сценарии) | автоматически мигрирует в telegram/webhook |
 | `scan.sca`, `scan.sast`, `report.build`, триггеры | без изменений |
 
 Параметры тоже нормализуются: `minSeverity` → `min_severity`, `chatId` → `chat_id`,
@@ -105,7 +105,7 @@ cd /home/dajers/Documents/LDWarden
 
 В палитре три отдельные ноды:
 
-- **Email** — `host`, `port`, `username`, `password`, `from_addr`, `to_addr`, `STARTTLS`/`SMTPS`, тема, вложение отчёта, dry-run;
+- **Telegram** — токен, Chat ID, вложение HTML-отчёта файлом, dry-run;
 - **Telegram** — `bot_token`, `chat_id`, тема, вложение отчёта, dry-run; кнопка «Подключить Telegram» в инспекторе получает `chat_id` через deep-link;
 - **HTTP webhook** — `url`, `method`, HMAC-секрет, тема, вложение отчёта, dry-run; `local://inbox` работает для демо.
 

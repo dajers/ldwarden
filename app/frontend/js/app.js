@@ -392,22 +392,6 @@ function migrateLegacyNotify(node) {
       failOnError: Boolean(params.failOnError || params.fail_on_error),
     } };
   }
-  if (channel === 'e-mail' || channel === 'email' || channel === 'smtp') {
-    return { ...node, type: 'notify.email', params: {
-      host: params.host || 'smtp.yandex.ru',
-      port: params.port || 587,
-      username: params.username || '',
-      password: params.password || params.token || '',
-      fromAddr: params.fromAddr || params.from_addr || '',
-      toAddr: params.toAddr || params.to_addr || params.chatId || '',
-      useTls: params.useTls !== false,
-      useSsl: Boolean(params.useSsl || params.use_ssl),
-      subject: params.subject || 'LDWarden: отчёт о проверке',
-      attachReport: params.attachReport !== false,
-      dryRun: Boolean(params.dryRun || params.dry_run),
-      failOnError: Boolean(params.failOnError || params.fail_on_error),
-    } };
-  }
   return { ...node, type: 'notify.webhook', params: {
     url: params.url || params.token || 'local://inbox',
     method: params.method || 'POST',
@@ -479,7 +463,6 @@ function localSnapshot(workflow) {
   const copy = clone(workflow);
   for (const node of copy.nodes || []) {
     if (node.type === 'source.repo' && node.params && node.params.gitToken) node.params.gitToken = '••••••';
-    if (node.type === 'notify.email' && node.params && node.params.password) node.params.password = '••••••';
     if (node.type === 'notify.telegram' && node.params && node.params.botToken) node.params.botToken = '••••••';
     if (node.type === 'notify.webhook' && node.params && node.params.hmacSecret) node.params.hmacSecret = '••••••';
     if (node.type === 'notify.send' && node.params) {
@@ -1094,42 +1077,145 @@ function inspectorHead(kicker, title, iconName) {
   );
 }
 
-async function connectTelegram(node) {
-  try {
-    const session = await api.telegramConnect();
-    const link = document.createElement('a');
-    link.href = session.connect_url;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    toast('В Telegram нажмите Start — ждём подключение…', 'info');
+let telegramPoll = null;
+
+function stopTelegramPoll() {
+  if (telegramPoll && telegramPoll.timer) clearTimeout(telegramPoll.timer);
+  telegramPoll = null;
+}
+
+function openTelegramModal(node) {
+  stopTelegramPoll();
+  const title = $('#modalTitle');
+  const body = $('#modalBody');
+  title.textContent = 'Подключение Telegram';
+  body.replaceChildren();
+
+  const steps = h(
+    'ol',
+    { class: 'tg-steps' },
+    h('li', {}, 'Откройте ', h('a', { href: 'https://t.me/BotFather', target: '_blank', rel: 'noopener', text: '@BotFather' }), ' и создайте бота командой /newbot — или возьмите готового.'),
+    h('li', { text: 'Вставьте токен: он сохранится в ноде в зашифрованном виде.' }),
+    h('li', { text: 'Нажмите «Подключить», откройте бота и отправьте /start — Chat ID подставится сам.' }),
+  );
+
+  const tokenInput = h('input', {
+    class: 'input',
+    id: 'tgToken',
+    type: 'password',
+    autocomplete: 'off',
+    spellcheck: 'false',
+    placeholder: '123456789:AA...',
+    value: String(node.params.botToken || ''),
+  });
+  const tokenField = h('div', { class: 'field' }, h('label', { class: 'field__label', text: 'Токен бота' }), tokenInput);
+
+  const connectButton = h('button', { class: 'btn btn--primary btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить' }));
+  const openLink = h('a', { class: 'btn btn--ghost btn--sm', target: '_blank', rel: 'noopener' }, h('span', { text: 'Открыть бота' }));
+  openLink.hidden = true;
+  const actions = h('div', { class: 'tg-actions' }, connectButton, openLink);
+
+  const status = h('p', {
+    class: 'field__hint tg-status',
+    text: node.params.chatId ? `Сейчас подключён чат: ${node.params.chatId}` : '',
+  });
+  const chats = h('div', { class: 'tg-chats' });
+
+  body.append(steps, tokenField, actions, status, chats);
+  $('#modal').hidden = false;
+
+  const selectChat = async (session, chat) => {
+    stopTelegramPoll();
+    const value = String(chat.chat_id);
+    node.params.botToken = tokenInput.value.trim();
+    node.params.chatId = value;
+    saveWorkflow();
+    renderInspector();
+    try {
+      const saved = await api.saveWorkflow(state.workflow);
+      if (saved && saved.id) await api.telegramLink(session.state, value, saved.id);
+    } catch {
+      /* привязка не критична, chat_id уже в ноде */
+    }
+    closeModal();
+    toast(`Telegram подключён: ${chat.title || value}`, 'ok');
+  };
+
+  const startPolling = (session) => {
     const started = Date.now();
-    while (Date.now() - started < 90000) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const result = await api.telegramChats(session.state);
-      if (result.items && result.items.length) {
-        const chat = result.items[0];
-        node.params.chatId = String(chat.chat_id);
-        saveWorkflow();
-        renderInspector();
-        try {
-          const saved = await api.saveWorkflow(state.workflow);
-          if (saved && saved.id && result.items.length === 1) {
-            await api.telegramLink(session.state, chat.chat_id, saved.id);
-          }
-        } catch {
-          /* привязка не критична, chat_id уже в ноде */
-        }
-        toast(`Telegram подключён: ${chat.title || chat.chat_id}`, 'ok');
+    const poll = { timer: null, state: session.state };
+    telegramPoll = poll;
+    const tick = async () => {
+      if (telegramPoll !== poll) return;
+      if (Date.now() - started > 90000) {
+        status.textContent = 'Не дождались Start в Telegram. Нажмите «Подключить» ещё раз.';
+        status.classList.add('is-error');
+        stopTelegramPoll();
         return;
       }
+      try {
+        const result = await api.telegramChats(session.state);
+        const items = result.items || [];
+        if (items.length === 1) {
+          await selectChat(session, items[0]);
+          return;
+        }
+        if (items.length > 1) {
+          chats.replaceChildren(
+            h('p', { class: 'field__label', text: 'Выберите чат:' }),
+            ...items.map((chat) => {
+              const button = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: chat.title || String(chat.chat_id) });
+              button.addEventListener('click', () => selectChat(session, chat));
+              return button;
+            }),
+          );
+          status.textContent = 'Найдено несколько чатов — выберите нужный.';
+          stopTelegramPoll();
+          return;
+        }
+        status.textContent = 'Ждём Start в Telegram…';
+        poll.timer = setTimeout(tick, 2000);
+      } catch (error) {
+        status.textContent = error && error.message ? error.message : 'Ошибка подключения';
+        status.classList.add('is-error');
+        stopTelegramPoll();
+      }
+    };
+    tick();
+  };
+
+  connectButton.addEventListener('click', async () => {
+    const value = tokenInput.value.trim();
+    status.classList.remove('is-error');
+    chats.replaceChildren();
+    if (!value) {
+      status.textContent = 'Вставьте токен бота от @BotFather';
+      status.classList.add('is-error');
+      tokenInput.focus();
+      return;
     }
-    toast('Не дождались Start в Telegram', 'warn');
-  } catch (error) {
-    toast(error && error.message ? error.message : 'Не удалось подключить Telegram', 'warn');
-  }
+    connectButton.disabled = true;
+    status.textContent = 'Проверяю токен…';
+    try {
+      const session = await api.telegramConnect(value);
+      openLink.href = session.connect_url;
+      openLink.hidden = false;
+      node.params.botToken = value;
+      saveWorkflow();
+      try {
+        openLink.click();
+      } catch {
+        /* всплывающее окно могло быть заблокировано — ссылка остаётся в модалке */
+      }
+      toast('В Telegram нажмите Start — ждём подключение…', 'info');
+      startPolling(session);
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : 'Не удалось подключить Telegram';
+      status.classList.add('is-error');
+    } finally {
+      connectButton.disabled = false;
+    }
+  });
 }
 
 function renderInspector() {
@@ -1158,11 +1244,11 @@ function renderInspector() {
   body.append(renderNodeColor(node));
   if (api.isRemote && node.type === 'notify.telegram') {
     const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
-    connect.addEventListener('click', () => connectTelegram(node));
+    connect.addEventListener('click', () => openTelegramModal(node));
     body.append(
       h('div', { class: 'field' },
         connect,
-        h('p', { class: 'field__hint', text: 'Откроется бот. Нажмите Start — Chat ID подставится автоматически.' })),
+        h('p', { class: 'field__hint', text: 'Токен — у @BotFather. Откроется бот: нажмите Start, Chat ID подставится сам.' })),
     );
   }
   const output = state.outputs[node.id];
@@ -2247,6 +2333,7 @@ async function publishCurrentToLibrary() {
 
 function closeModal() {
   $('#modal').hidden = true;
+  stopTelegramPoll();
 }
 
 function exportJson() {
