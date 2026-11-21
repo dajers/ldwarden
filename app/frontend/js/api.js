@@ -499,6 +499,26 @@ function mapNotification(notification) {
   };
 }
 
+async function listRuns(limit = 50) {
+  return request(`/runs?limit=${limit}`);
+}
+
+async function runDetail(runId) {
+  return request(`/runs/${encodeURIComponent(runId)}?reports=1`);
+}
+
+async function runFindings(runId, limit = 10) {
+  return request(`/runs/${encodeURIComponent(runId)}/findings?limit=${limit}`);
+}
+
+async function listSchedules() {
+  return request('/schedules');
+}
+
+async function workflowById(workflowId) {
+  return request(`/workflows/${encodeURIComponent(workflowId)}`);
+}
+
 async function buildResult(runId, workflow, liveFindings) {
   const run = await request(`/runs/${encodeURIComponent(runId)}?reports=1`);
   const findingsResponse = await request(`/runs/${encodeURIComponent(runId)}/findings?limit=2000`);
@@ -830,6 +850,10 @@ async function models() {
   }
 }
 
+async function schedulePreview(params) {
+  return request('/schedules/preview', { method: 'POST', body: params });
+}
+
 async function libraryPresets(force = false) {
   return request(`/library${force ? '?refresh=1' : ''}`);
 }
@@ -858,10 +882,16 @@ export const api = {
   models,
   libraryPresets,
   publishLibraryPreset,
+  schedulePreview,
   health,
   telegramConnect,
   telegramChats,
   telegramLink,
+  listRuns,
+  runDetail,
+  runFindings,
+  listSchedules,
+  workflowById,
   toBackendGraph,
   fromBackendWorkflow,
   get isRemote() {

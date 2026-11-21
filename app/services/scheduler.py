@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Settings
@@ -99,6 +99,24 @@ def schedule_matches(params: dict, moment: datetime) -> bool:
     return cron_matches(cron, moment)
 
 
+def _timezone(name: str | None, fallback: str = "UTC"):
+    try:
+        return ZoneInfo(str(name or fallback))
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+
+def next_run(params: dict, now: datetime | None = None) -> datetime | None:
+    """Ближайшее срабатывание расписания (до 8 дней вперёд) в его таймзоне."""
+    tz = _timezone(params.get("timezone"))
+    base = (now or datetime.now(timezone.utc)).astimezone(tz).replace(second=0, microsecond=0)
+    for offset in range(0, 60 * 24 * 8):
+        moment = base + timedelta(minutes=offset)
+        if schedule_matches(params, moment):
+            return moment
+    return None
+
+
 class ScheduleService:
     def __init__(self, settings: Settings, engine: WorkflowEngine):
         self.settings = settings
@@ -174,6 +192,9 @@ class ScheduleService:
                     else:
                         state.last_fired_at = utcnow()
                         state.save()
+                    logger.info(
+                        "Запуск %s по расписанию (%s, %s)", workflow.id, node.get("id"), local_now.strftime("%d.%m %H:%M")
+                    )
                     started.append(run["id"])
                 except Exception:
                     logger.exception("Не удалось запустить workflow %s по расписанию", workflow.id)

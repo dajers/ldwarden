@@ -304,6 +304,10 @@ const state = {
   schedulerEnabled: null,
   models: [],
   modelsLoaded: false,
+  runs: [],
+  schedules: [],
+  runsTimer: null,
+  runsLoading: false,
 };
 
 let customPresets = loadCustomPresets();
@@ -821,19 +825,324 @@ function renderPresets() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* процессы                                                            */
+/* ------------------------------------------------------------------ */
+
+const RUN_STATUS_META = {
+  success: { label: 'Выполнен', tone: 'ok' },
+  failed: { label: 'Ошибка', tone: 'bad' },
+  running: { label: 'Выполняется', tone: 'run' },
+  queued: { label: 'В очереди', tone: 'wait' },
+  cancelled: { label: 'Отменён', tone: 'warn' },
+};
+
+function runStatusMeta(status) {
+  return RUN_STATUS_META[status] || { label: status || 'Неизвестно', tone: 'wait' };
+}
+
+function triggerLabel(trigger) {
+  return (
+    { manual: 'Вручную', schedule: 'По расписанию', webhook: 'Webhook', ci: 'CI', api: 'API' }[trigger] ||
+    trigger ||
+    '—'
+  );
+}
+
+function runWhen(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function runDuration(ms) {
+  if (ms === null || ms === undefined) return '—';
+  if (ms < 1000) return `${ms} мс`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} с`;
+  return `${Math.floor(ms / 60000)} мин ${Math.round((ms % 60000) / 1000)} с`;
+}
+
+function scheduleLabel(item) {
+  if (item.mode === 'once') return `Один раз · ${item.run_time || '—'}`;
+  const day = item.weekday === '*' ? 'каждый день' : `день ${item.weekday}`;
+  return `${day} · ${item.run_time || '—'}`;
+}
+
+function stopRunsPolling() {
+  if (state.runsTimer) {
+    clearInterval(state.runsTimer);
+    state.runsTimer = null;
+  }
+}
+
+function openRunsView() {
+  stopRunsPolling();
+  renderRunsPage();
+  loadRuns(true);
+  state.runsTimer = setInterval(() => loadRuns(false), 10000);
+}
+
+async function loadRuns(force = false) {
+  if (state.runsLoading) return;
+  state.runsLoading = true;
+  try {
+    const [runs, schedules] = await Promise.all([api.listRuns(50), api.listSchedules()]);
+    state.runs = (runs && runs.items) || [];
+    state.schedules = (schedules && schedules.items) || [];
+    renderRunsPage();
+  } catch (error) {
+    if (force) toast('Не удалось загрузить процессы', 'warn');
+    renderRunsPage(error);
+  } finally {
+    state.runsLoading = false;
+  }
+}
+
+function renderRunsPage(error) {
+  const runs = state.runs || [];
+  const scheduled = state.schedules || [];
+  const stats = $('#runsStats');
+  stats.replaceChildren();
+  const counts = { success: 0, failed: 0, running: 0 };
+  for (const run of runs) {
+    if (run.status === 'success') counts.success += 1;
+    else if (run.status === 'failed') counts.failed += 1;
+    else if (run.status === 'running') counts.running += 1;
+  }
+  for (const [label, value, tone] of [
+    ['Всего запусков', runs.length, ''],
+    ['Выполнено', counts.success, 'ok'],
+    ['С ошибкой', counts.failed, 'bad'],
+    ['Выполняется', counts.running, 'run'],
+    ['Ожидают', scheduled.length, 'wait'],
+  ]) {
+    stats.append(
+      h('div', { class: 'runs-stat' + (tone ? ` runs-stat--${tone}` : '') },
+        h('span', { text: label }),
+        h('b', { text: String(value) })),
+    );
+  }
+
+  const scheduledRoot = $('#scheduledList');
+  scheduledRoot.replaceChildren();
+  $('#scheduledCount').textContent = scheduled.length ? String(scheduled.length) : '';
+  if (!scheduled.length) {
+    scheduledRoot.append(h('p', { class: 'runs-empty', text: 'Нет запланированных проверок. Добавьте ноду «По расписанию».' }));
+  }
+  for (const item of scheduled) scheduledRoot.append(renderScheduledRow(item));
+
+  const runsRoot = $('#runsList');
+  runsRoot.replaceChildren();
+  $('#runsCount').textContent = runs.length ? `последние ${runs.length}` : '';
+  if (error) {
+    runsRoot.append(h('p', { class: 'runs-empty runs-empty--error', text: `Не удалось загрузить: ${error.message || error}` }));
+  } else if (!runs.length) {
+    runsRoot.append(h('p', { class: 'runs-empty', text: 'Запусков пока нет — запустите сценарий или дождитесь расписания.' }));
+  }
+  for (const run of runs) runsRoot.append(renderRunRow(run));
+}
+
+function renderScheduledRow(item) {
+  const status = item.valid ? { label: 'Ожидает', tone: 'wait' } : { label: 'Не сработает', tone: 'bad' };
+  const details = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Подробнее' });
+  details.addEventListener('click', () => openScheduleDetails(item));
+  return h('div', { class: 'run-row' },
+    h('div', { class: 'run-row__main' },
+      h('div', { class: 'run-row__title' },
+        h('b', { text: item.workflow_name || item.workflow_id }),
+        h('span', { class: `run-chip run-chip--${status.tone}`, text: status.label })),
+      h('div', { class: 'run-row__meta', text: `${scheduleLabel(item)} · ${item.timezone} · ${item.valid ? `запуск ${runWhen(item.next_run)}` : 'проверьте дату/время'}` })),
+    h('div', { class: 'run-row__actions' }, details));
+}
+
+function renderRunRow(run) {
+  const status = runStatusMeta(run.status);
+  const findings = (run.summary && run.summary.findings) || {};
+  const total = findings.total !== undefined ? findings.total : run.findings_count || 0;
+  const details = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Подробнее' });
+  details.addEventListener('click', () => openRunDetails(run));
+  return h('div', { class: 'run-row' },
+    h('div', { class: 'run-row__main' },
+      h('div', { class: 'run-row__title' },
+        h('b', { text: run.workflow_name || 'Сценарий' }),
+        h('span', { class: `run-chip run-chip--${status.tone}`, text: status.label })),
+      h('div', { class: 'run-row__meta', text: `${triggerLabel(run.trigger)} · ${runWhen(run.created_at)} · ${runDuration(run.duration_ms)} · ${total} ${plural(total, 'находка', 'находки', 'находок')}` })),
+    h('div', { class: 'run-row__actions' }, details));
+}
+
+function openScheduleDetails(item) {
+  $('#modalTitle').textContent = 'Запланированный процесс';
+  const open = h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Открыть сценарий' });
+  open.addEventListener('click', () => {
+    closeModal();
+    openWorkflowById(item.workflow_id);
+  });
+  $('#modalBody').replaceChildren(
+    h('div', { class: 'run-detail__title' },
+      h('b', { text: item.workflow_name || item.workflow_id }),
+      h('span', { class: `run-chip run-chip--${item.valid ? 'wait' : 'bad'}`, text: item.valid ? 'Ожидает' : 'Не сработает' })),
+    h('div', { class: 'run-detail__meta' },
+      h('div', {}, h('span', { text: 'Следующий запуск' }), h('b', { text: item.valid ? runWhen(item.next_run) : 'не состоится' })),
+      h('div', {}, h('span', { text: 'Режим' }), h('b', { text: scheduleLabel(item) })),
+      h('div', {}, h('span', { text: 'Часовой пояс' }), h('b', { text: item.timezone })),
+      h('div', {}, h('span', { text: 'Нода' }), h('b', { text: item.node_id || '—' }))),
+    h('div', { class: 'run-detail__actions' }, open),
+  );
+  $('#modal').hidden = false;
+}
+
+function downloadRunFile(runId, format) {
+  fetch(`/api/runs/${encodeURIComponent(runId)}/report?format=${format}&download=1`)
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ldwarden-run-${runId}.${format}`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('Отчёт выгружен', 'ok');
+    })
+    .catch(() => toast('Не удалось выгрузить отчёт', 'warn'));
+}
+
+async function openRunDetails(run) {
+  $('#modalTitle').textContent = 'Процесс';
+  const root = $('#modalBody');
+  root.replaceChildren(h('p', { class: 'field__hint', text: 'Загружаю процесс…' }));
+  $('#modal').hidden = false;
+  let detail;
+  try {
+    detail = await api.runDetail(run.id);
+  } catch (error) {
+    root.replaceChildren(h('p', { class: 'field__hint is-error', text: error.message || 'Не удалось загрузить процесс' }));
+    return;
+  }
+  const status = runStatusMeta(detail.status);
+  const summary = detail.summary || {};
+  const findings = summary.findings || {};
+  const bySev = findings.by_severity || {};
+  const nodes = Object.entries(summary.nodes || {});
+  const total = findings.total !== undefined ? findings.total : detail.findings_count || 0;
+
+  const actions = h('div', { class: 'run-detail__actions' });
+  if (detail.workflow_id) {
+    const open = h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Открыть сценарий' });
+    open.addEventListener('click', () => {
+      closeModal();
+      openWorkflowById(detail.workflow_id);
+    });
+    actions.append(open);
+  }
+  const json = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'JSON' });
+  json.addEventListener('click', () => download(`ldwarden-run-${detail.id}.json`, JSON.stringify(detail.report_json || detail, null, 2), 'application/json'));
+  actions.append(json);
+  for (const [format, label] of [['md', 'Отчёт .md'], ['html', 'Отчёт .html']]) {
+    const button = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: label });
+    button.addEventListener('click', () => downloadRunFile(detail.id, format));
+    actions.append(button);
+  }
+
+  const children = [
+    h('div', { class: 'run-detail__head' },
+      h('div', { class: 'run-detail__title' },
+        h('b', { text: detail.workflow_name || 'Сценарий' }),
+        h('span', { class: `run-chip run-chip--${status.tone}`, text: status.label })),
+      h('p', { class: 'field__hint', text: `${triggerLabel(detail.trigger)} · ${runWhen(detail.created_at)} · ${runDuration(detail.duration_ms)}` })),
+    h('div', { class: 'run-detail__stats' },
+      ...[
+        ['Всего', total],
+        ['CRITICAL', bySev.CRITICAL || 0],
+        ['HIGH', bySev.HIGH || 0],
+        ['MEDIUM', bySev.MEDIUM || 0],
+        ['LOW', bySev.LOW || 0],
+      ].map(([label, value]) => h('div', { class: 'run-stat' }, h('span', { text: label }), h('b', { text: String(value) })))),
+    h('div', { class: 'run-detail__meta' },
+      h('div', {}, h('span', { text: 'Источник' }), h('b', { text: detail.source_label || (detail.target && detail.target.path) || '—' })),
+      h('div', {}, h('span', { text: 'Начало' }), h('b', { text: runWhen(detail.started_at || detail.created_at) })),
+      h('div', {}, h('span', { text: 'Длительность' }), h('b', { text: runDuration(detail.duration_ms) })),
+      h('div', {}, h('span', { text: 'CI' }), h('b', { text: detail.ci_mode ? 'да' : 'нет' }))),
+  ];
+  if (detail.error) children.push(h('pre', { class: 'run-detail__error', text: detail.error }));
+  if (detail.gate) {
+    children.push(h('p', { class: 'field__hint', text: `Порог: ${detail.gate.passed ? 'пройден' : 'заблокирован'}` }));
+  }
+  if (nodes.length) {
+    children.push(h('h3', { class: 'run-detail__subtitle', text: 'Узлы' }));
+    for (const [id, node] of nodes) {
+      const nodeStatus = runStatusMeta(node.status);
+      children.push(h('div', { class: 'run-node' },
+        h('span', { class: `run-chip run-chip--${nodeStatus.tone}`, text: nodeStatus.label }),
+        h('b', { text: node.title || id }),
+        h('span', { class: 'run-node__message', text: node.message || '' }),
+        h('span', { class: 'run-node__time', text: runDuration(node.duration_ms) })));
+    }
+  }
+  children.push(actions);
+  root.replaceChildren(...children);
+
+  try {
+    const found = await api.runFindings(detail.id, 8);
+    const items = (found && found.items) || [];
+    if (items.length) {
+      const box = h('div', { class: 'run-detail__findings' },
+        h('h3', { class: 'run-detail__subtitle', text: `Находки (${items.length})` }));
+      for (const finding of items) {
+        const tone = String(finding.severity || '').toUpperCase() === 'CRITICAL' ? 'bad' : 'warn';
+        box.append(h('div', { class: 'run-finding' },
+          h('span', { class: `run-chip run-chip--${tone}`, text: finding.severity || '—' }),
+          h('b', { text: finding.title || finding.class || finding.message || 'Находка' }),
+          h('span', { class: 'run-finding__path', text: `${finding.path || ''}${finding.line ? ':' + finding.line : ''}` })));
+      }
+      root.append(box);
+    }
+  } catch {
+    /* список находок не критичен */
+  }
+}
+
+async function openWorkflowById(id) {
+  try {
+    const row = await api.workflowById(id);
+    state.workflow = api.fromBackendWorkflow(row);
+    state.selectedNode = null;
+    state.selectedNodes = [];
+    state.selectedEdge = null;
+    state.activePresetId = null;
+    resetStatuses();
+    showWorkspace('graph');
+    renderAll();
+    fitView();
+    setSavePill('Синхронизировано', 'ok');
+    toast('Сценарий открыт', 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось открыть сценарий', 'warn');
+  }
+}
+
 function showWorkspace(view) {
   state.workspaceView = view;
   const isGraph = view === 'graph';
   const isPresets = view === 'presets';
   const isLibrary = view === 'library';
+  const isRuns = view === 'runs';
   $('#graphLayout').hidden = !isGraph;
   $('#presetsView').hidden = !isPresets;
   $('#libraryView').hidden = !isLibrary;
+  $('#runsView').hidden = !isRuns;
   for (const tab of $$('#workspaceTabs .workspace-tab')) {
     tab.classList.toggle('is-active', tab.dataset.workspace === view);
   }
   if (isPresets) renderPresets();
   if (isLibrary) openLibraryView();
+  if (isRuns) openRunsView();
+  else stopRunsPolling();
   if (!isGraph) clearSelection();
 }
 
@@ -1257,6 +1566,39 @@ function openTelegramModal(node) {
   });
 }
 
+function renderScheduleCheck(node) {
+  const wrap = h('div', { class: 'field' });
+  const button = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Когда сработает?' });
+  const hint = h('p', { class: 'field__hint schedule-check', text: '' });
+  button.addEventListener('click', async () => {
+    hint.classList.remove('is-ok', 'is-error');
+    hint.textContent = 'Считаю…';
+    try {
+      const result = await api.schedulePreview({
+        mode: node.params.mode || 'weekly',
+        run_date: node.params.runDate || '',
+        run_time: node.params.runTime || '09:00',
+        weekday: String(node.params.weekday || '*'),
+        timezone: node.params.timezone || 'Europe/Moscow',
+        cron: node.params.cron || '',
+      });
+      hint.classList.add(result.ok ? 'is-ok' : 'is-error');
+      hint.textContent = result.ok
+        ? `Следующий запуск: ${result.human} (${result.timezone})`
+        : result.error;
+    } catch (error) {
+      hint.classList.add('is-error');
+      hint.textContent = error && error.message ? error.message : 'Не удалось проверить расписание';
+    }
+  });
+  wrap.append(
+    button,
+    hint,
+    h('p', { class: 'field__hint', text: 'Планировщик проверяет расписание каждые 30 секунд (пока сервер запущен).' }),
+  );
+  return wrap;
+}
+
 function renderInspector() {
   const root = $('#inspector');
   const visible = Boolean(state.selectedNode);
@@ -1288,6 +1630,9 @@ function renderInspector() {
     body.append(h('p', { class: 'field__hint' }, 'Планировщик выключен на сервере: задайте LDWARDEN_ENABLE_SCHEDULER=true в .env.'));
   }
   body.append(renderNodeColor(node));
+  if (api.isRemote && node.type === 'trigger.schedule') {
+    body.append(renderScheduleCheck(node));
+  }
   if (api.isRemote && node.type === 'notify.telegram') {
     const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
     connect.addEventListener('click', () => openTelegramModal(node));
@@ -2484,6 +2829,7 @@ function bindEvents() {
   }
   $('#runBtn').addEventListener('click', startRun);
   $('#historyBtn').addEventListener('click', openModal);
+  $('#runsRefreshBtn').addEventListener('click', () => loadRuns(true));
   $('#closeDrawer').addEventListener('click', closeDrawer);
   $('#presetCreateBtn').addEventListener('click', saveCurrentAsPreset);
   $('#presetExportBtn').addEventListener('click', exportCustomPresets);

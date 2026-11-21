@@ -122,7 +122,7 @@ class Settings:
         self.workflow_templates_dir = Path(self.workflow_templates_dir).expanduser().resolve()
         self.frontend_dir = Path(self.frontend_dir).expanduser().resolve()
         self.llm_models_dir = Path(self.llm_models_dir).expanduser().resolve()
-        self.llm_model_path = Path(self.llm_model_path).expanduser().resolve()
+        self.llm_model_path = self._resolve_model_path(self.llm_model_path)
         if not self.allowed_roots:
             self.allowed_roots = [
                 self.base_dir / "training-main",
@@ -131,6 +131,19 @@ class Settings:
             ]
         self.allowed_roots = [Path(p).expanduser().resolve() for p in self.allowed_roots]
 
+
+    def _resolve_model_path(self, value: str | Path) -> Path:
+        """Ищет файл модели: относительный путь считается от корня проекта."""
+        path = Path(value).expanduser()
+        path = (self.base_dir / path).resolve() if not path.is_absolute() else path.resolve()
+        if path.exists():
+            return path
+        # путь могли указать с лишним префиксом каталога — ищем файл по имени в llms/
+        if self.llm_models_dir.exists():
+            matches = sorted(self.llm_models_dir.rglob(path.name))
+            if matches:
+                return matches[0].resolve()
+        return path
 
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.sources_dir, self.tmp_dir):

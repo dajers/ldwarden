@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -29,11 +29,13 @@ from app.db import (
     FindingRow,
     InboxMessageRow,
     RunRow,
+    ScheduleStateRow,
     WorkflowRow,
     j_loads,
     utcnow,
 )
 from app.services.templates import clone_template, list_templates
+from app.services.scheduler import next_run
 from app.services.telegram import TelegramError
 
 bp = Blueprint("misc", __name__)
@@ -58,7 +60,14 @@ def _llm_error(settings_) -> str:
     provider = settings_.effective_llm_provider
     if provider == "local":
         if not settings_.llm_model_path.exists():
-            return "Файл локальной модели не найден"
+            available = []
+            if settings_.llm_models_dir.exists():
+                available = sorted(path.name for path in settings_.llm_models_dir.rglob("*.gguf"))
+            hint = f" В llms/: {', '.join(available)}." if available else ""
+            return (
+                f"Файл модели не найден: {settings_.llm_model_path}.{hint} "
+                "Укажите LDWARDEN_LLM_MODEL_PATH, например llms/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+            )
         try:
             import llama_cpp  # noqa: F401
         except Exception:
@@ -492,6 +501,68 @@ def telegram_status():
 @bp.delete("/telegram/link")
 def telegram_unlink():
     return jsonify(telegram_service().unlink())
+
+
+@bp.get("/schedules")
+def schedules_list():
+    now = datetime.now(timezone.utc)
+    items = []
+    for workflow in WorkflowRow.select():
+        if workflow.is_template or workflow.published:
+            continue
+        graph = j_loads(workflow.graph, {}) or {}
+        for node in graph.get("nodes", []):
+            if node.get("type") != "trigger.schedule":
+                continue
+            params = (node.get("data") or {}).get("params") or {}
+            start = now
+            state = ScheduleStateRow.get_or_none(
+                (ScheduleStateRow.workflow_id == workflow.id)
+                & (ScheduleStateRow.node_id == node.get("id"))
+            )
+            if state and state.last_fired_at:
+                last = state.last_fired_at.replace(tzinfo=timezone.utc)
+                if (now - last).total_seconds() < 55:
+                    start = now + timedelta(minutes=1)
+            scheduled = next_run(params, start)
+            items.append(
+                {
+                    "workflow_id": workflow.id,
+                    "workflow_name": workflow.name,
+                    "node_id": node.get("id"),
+                    "mode": params.get("mode") or "weekly",
+                    "run_time": params.get("run_time") or "",
+                    "weekday": params.get("weekday") or "*",
+                    "timezone": params.get("timezone") or "UTC",
+                    "next_run": scheduled.isoformat() if scheduled else None,
+                    "valid": scheduled is not None,
+                }
+            )
+    items.sort(key=lambda item: item["next_run"] or "9999")
+    return jsonify({"items": items, "count": len(items)})
+
+
+@bp.post("/schedules/preview")
+def schedule_preview():
+    data = json_body()
+    scheduled = next_run(data)
+    if scheduled is None:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Расписание не сработает: проверьте дату, время и день недели",
+                "timezone": str(data.get("timezone") or "UTC"),
+            }
+        )
+    weekdays = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    return jsonify(
+        {
+            "ok": True,
+            "next_run": scheduled.isoformat(),
+            "timezone": str(scheduled.tzinfo),
+            "human": f"{weekdays[scheduled.weekday()]}, {scheduled.strftime('%d.%m.%Y %H:%M')}",
+        }
+    )
 
 
 @bp.get("/stats")

@@ -113,6 +113,7 @@
   <nav class="workspace-tabs" id="workspaceTabs" aria-label="Разделы приложения">
     <button class="workspace-tab is-active" type="button" data-workspace="graph">Конструктор</button>
     <button class="workspace-tab" type="button" data-workspace="presets">Пресеты</button>
+    <button class="workspace-tab" type="button" data-workspace="runs">Процессы</button>
     <button class="workspace-tab" type="button" data-workspace="library">Библиотека</button>
   </nav>
 
@@ -135,6 +136,28 @@
       <input class="input" id="presetSearch" type="search" placeholder="Поиск пресета по названию…" autocomplete="off" />
     </div>
     <div class="preset-grid" id="presetsGrid"></div>
+  </section>
+
+  <section class="workspace-page" id="runsView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">Мониторинг</span>
+        <h1>Процессы</h1>
+        <p>История запусков и запланированные проверки. Вкладка обновляется автоматически.</p>
+      </div>
+      <div class="workspace-page__actions">
+        <button class="btn btn--ghost" id="runsRefreshBtn" type="button">Обновить</button>
+      </div>
+    </div>
+    <div class="runs-stats" id="runsStats"></div>
+    <div class="runs-block">
+      <h2 class="runs-block__title">Ожидают запуска <span class="runs-count" id="scheduledCount"></span></h2>
+      <div class="runs-list" id="scheduledList"></div>
+    </div>
+    <div class="runs-block">
+      <h2 class="runs-block__title">История запусков <span class="runs-count" id="runsCount"></span></h2>
+      <div class="runs-list" id="runsList"></div>
+    </div>
   </section>
 
   <section class="workspace-page" id="libraryView" hidden>
