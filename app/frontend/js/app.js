@@ -24,7 +24,7 @@ import {
   createNode,
 } from './blocks.js';
 import { api } from './api.js';
-import { plural, summarize, toMarkdown, toOutputJson } from './engine.js';
+import { plural, summarize, toHtml, toMarkdown, toOutputJson } from './engine.js';
 import { evaluateExpression } from './expression.js';
 
 /* ------------------------------------------------------------------ */
@@ -132,7 +132,7 @@ const snap = (v, step = 10) => Math.round(v / step) * step;
 /* ------------------------------------------------------------------ */
 
 const THEME_KEY = 'sakura.theme';
-const THEMES = ['sakura', 'mono', 'warden'];
+const THEMES = ['sakura', 'hawaii', 'mono', 'warden'];
 let currentTheme = readTheme();
 
 function readTheme() {
@@ -157,6 +157,8 @@ function applyTheme(theme, { persist = true } = {}) {
     }
   }
   for (const option of $$('.theme-option')) option.classList.toggle('is-active', option.dataset.theme === next);
+  const triggerImage = $('#themeBtn img');
+  if (triggerImage) triggerImage.src = next === 'hawaii' ? 'assets/hawaii.svg' : 'assets/palm.jpg';
 }
 
 function initThemeSwitch() {
@@ -1645,6 +1647,15 @@ function setStatus(text, kind) {
   if (kind) dot.classList.add('is-' + kind);
 }
 
+function playMonkeyPoke() {
+  const button = $('#runBtn');
+  if (!button || document.documentElement.dataset.theme !== 'hawaii') return;
+  button.classList.remove('is-poking');
+  void button.offsetWidth;
+  button.classList.add('is-poking');
+  setTimeout(() => button.classList.remove('is-poking'), 950);
+}
+
 async function startRun() {
   if (state.running) {
     if (state.token) {
@@ -1668,6 +1679,7 @@ async function startRun() {
   closeInspector();
   setRunning(true);
   setStatus('Выполняется…', 'run');
+  playMonkeyPoke();
 
   try {
     await api.run(state.workflow, { onEvent }, state.token);
@@ -1971,6 +1983,33 @@ function exportMarkdown() {
   toast('Отчёт выгружен', 'ok');
 }
 
+async function exportHtml() {
+  if (!state.run) return toast('Сначала запустите сценарий', 'warn');
+  if (api.isRemote && state.run.runId) {
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(state.run.runId)}/report?format=html&download=1`,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ldwarden-report.html';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('HTML-отчёт выгружен', 'ok');
+    } catch (error) {
+      toast('Не удалось получить HTML-отчёт с сервера', 'warn');
+    }
+    return;
+  }
+  download('ldwarden-report.html', toHtml(state.run.findings, { target: state.run.target }), 'text/html');
+  toast('HTML-отчёт выгружен', 'ok');
+}
+
 /* ------------------------------------------------------------------ */
 /* события интерфейса                                                  */
 /* ------------------------------------------------------------------ */
@@ -1987,6 +2026,7 @@ function bindEvents() {
   $('#closeDrawer').addEventListener('click', closeDrawer);
   $('#exportJson').addEventListener('click', exportJson);
   $('#exportMd').addEventListener('click', exportMarkdown);
+  $('#exportHtml').addEventListener('click', exportHtml);
 
   for (const tab of $$('.tab')) tab.addEventListener('click', () => setTab(tab.dataset.view));
   for (const closer of $$('[data-close-modal]')) closer.addEventListener('click', closeModal);

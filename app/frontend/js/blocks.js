@@ -432,6 +432,69 @@ export const PRESETS = [
     },
   },
   {
+    id: 'config-secrets',
+    name: 'Секреты в конфигах',
+    build: () => {
+      const trigger = createNode('trigger.manual', 80, 260);
+      const repo = createNode('source.repo', 360, 260);
+      const secret = createNode('scan.secret', 640, 260);
+      const regex = createNode('logic.regex', 920, 260, { field: 'path', pattern: '\\.(ya?ml|properties|env|conf)$' });
+      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const report = createNode('report.build', 1200, 380);
+      const edges = [
+        connect(trigger, 'out', repo, 'in'),
+        connect(repo, 'out', secret, 'in'),
+        connect(secret, 'out', regex, 'in'),
+        connect(regex, 'true', notify, 'in'),
+        connect(regex, 'false', report, 'in'),
+        connect(secret, 'findings', notify, 'payload'),
+      ];
+      return graph([trigger, repo, secret, regex, notify, report], edges);
+    },
+  },
+  {
+    id: 'authz-regex',
+    name: 'Проверки авторизации',
+    build: () => {
+      const trigger = createNode('trigger.manual', 80, 260);
+      const repo = createNode('source.repo', 360, 260);
+      const sast = createNode('scan.sast', 640, 260);
+      const regex = createNode('logic.regex', 920, 260, { field: 'class', pattern: 'route-authorization|object-authorization' });
+      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const report = createNode('report.build', 1200, 380);
+      const edges = [
+        connect(trigger, 'out', repo, 'in'),
+        connect(repo, 'out', sast, 'in'),
+        connect(sast, 'out', regex, 'in'),
+        connect(regex, 'true', notify, 'in'),
+        connect(regex, 'false', report, 'in'),
+        connect(sast, 'findings', notify, 'payload'),
+      ];
+      return graph([trigger, repo, sast, regex, notify, report], edges);
+    },
+  },
+  {
+    id: 'cve-regex',
+    name: 'Уязвимые зависимости по CVE',
+    build: () => {
+      const trigger = createNode('trigger.schedule', 80, 260);
+      const repo = createNode('source.repo', 360, 260);
+      const sca = createNode('scan.sca', 640, 260);
+      const regex = createNode('logic.regex', 920, 260, { field: 'message', pattern: 'CVE-\\d{4}-\\d{4,}' });
+      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const report = createNode('report.build', 1200, 380);
+      const edges = [
+        connect(trigger, 'out', repo, 'in'),
+        connect(repo, 'out', sca, 'in'),
+        connect(sca, 'out', regex, 'in'),
+        connect(regex, 'true', notify, 'in'),
+        connect(regex, 'false', report, 'in'),
+        connect(sca, 'findings', notify, 'payload'),
+      ];
+      return graph([trigger, repo, sca, regex, notify, report], edges);
+    },
+  },
+  {
     id: 'release',
     name: 'Перед релизом',
     build: () => {

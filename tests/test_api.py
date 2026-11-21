@@ -192,6 +192,18 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_html_report(self):
+        run = self.client.post(
+            "/api/workflows/tpl-full-audit/runs", json={"wait": True}
+        ).get_json()
+        self.assertEqual(run["status"], "success")
+        response = self.client.get(f"/api/runs/{run['id']}/report?format=html")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["Content-Type"])
+        body = response.data.decode("utf-8")
+        self.assertIn("LDWarden", body)
+        self.assertIn("Отчёт о проверке безопасности", body)
+
     def test_invalid_graph(self):
         draft = self.client.post(
             "/api/workflows/validate",

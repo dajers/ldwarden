@@ -67,11 +67,15 @@ def command_scan(args) -> int:
         for item in stats:
             print(f"  [{item['analyzer']}] {item['stats']}")
         return 0
-    reports = build_all(findings, run_info, ai=ai_result, source=source.to_dict())
+    reports = build_all(
+        findings, run_info, ai=ai_result, source=source.to_dict(), formats=[args.format]
+    )
     if args.format == "json":
         output = reports["json"]
     elif args.format == "sarif":
         output = reports["sarif"]
+    elif args.format == "html":
+        output = reports["html"]
     else:
         output = reports["md"]
     if args.out:
@@ -178,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="Запустить анализаторы на проекте")
     scan.add_argument("--path", default=None, help="Путь к проекту (по умолчанию training-project)")
-    scan.add_argument("--format", choices=["summary", "md", "json", "sarif"], default="summary")
+    scan.add_argument("--format", choices=["summary", "md", "json", "sarif", "html"], default="summary")
     scan.add_argument("--out", default=None)
     scan.add_argument("--ai", action="store_true", help="Добавить AI-объяснение")
     scan.add_argument("--provider", default=None)

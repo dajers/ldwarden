@@ -9,7 +9,7 @@
     // тема ставится до первой отрисовки, чтобы не было вспышки
     try {
       var saved = localStorage.getItem('sakura.theme');
-      if (saved === 'mono' || saved === 'warden') document.documentElement.dataset.theme = saved;
+      if (saved === 'mono' || saved === 'warden' || saved === 'hawaii') document.documentElement.dataset.theme = saved;
     } catch (e) {}
   </script>
   <link rel="stylesheet" href="styles.css" />
@@ -86,6 +86,10 @@
             <img src="assets/sakura.jpg" alt="" /><span>Сакура</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
           </button>
+          <button class="theme-option" type="button" role="menuitem" data-theme="hawaii">
+            <img src="assets/hawaii.svg" alt="" /><span>Гавайи</span>
+            <svg class="icon theme-option__check"><use href="#i-check"/></svg>
+          </button>
           <button class="theme-option" type="button" role="menuitem" data-theme="mono">
             <img src="assets/yin-yang.webp" alt="" /><span>Черно-белый</span>
             <svg class="icon theme-option__check"><use href="#i-check"/></svg>
@@ -103,6 +107,7 @@
         <svg class="icon" id="runIcon"><use href="#i-play"/></svg>
         <span id="runLabel">Запустить</span>
         <kbd>⌘↵</kbd>
+        <span class="run-monkey" aria-hidden="true"></span>
       </button>
     </div>
   </header>
@@ -178,6 +183,7 @@
       <div class="drawer__actions">
         <button class="btn btn--ghost btn--sm" id="exportJson" type="button">JSON</button>
         <button class="btn btn--ghost btn--sm" id="exportMd" type="button">Отчёт .md</button>
+        <button class="btn btn--ghost btn--sm" id="exportHtml" type="button">Отчёт .html</button>
         <button class="icon-btn" id="closeDrawer" type="button" aria-label="Закрыть результаты">
           <svg class="icon"><use href="#i-x"/></svg>
         </button>

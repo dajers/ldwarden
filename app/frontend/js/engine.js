@@ -358,6 +358,59 @@ export function toOutputJson(findings) {
   };
 }
 
+export function toHtml(findings, meta = {}) {
+  const { by, byCategory, total } = summarize(findings);
+  const esc = (value) =>
+    String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const date = new Date().toLocaleString('ru-RU', { dateStyle: 'long', timeStyle: 'short' });
+  const cards = findings
+    .map((f) => {
+      const location = f.endLine ? `${f.path}:${f.line}–${f.endLine}` : `${f.path}:${f.line}`;
+      const why = f.why ? `<h4>Почему это важно</h4><p>${esc(f.why)}</p>` : '';
+      const fix = f.remediation ? `<h4>Как исправить</h4><p>${esc(f.remediation)}</p>` : '';
+      const evidence = f.snippet ? `<pre>${esc(f.snippet)}</pre>` : '';
+      return `<article class="finding sev-${esc(f.severity).toLowerCase()}">
+        <div class="top"><span class="chip">${esc(f.category)}</span><span class="chip">${esc(f.class)}</span><b>${esc(SEVERITY_LABEL[f.severity] || f.severity)}</b></div>
+        <h3>${esc(f.title)}</h3><div class="path">${esc(location)}</div>
+        <p>${esc(f.description)}</p>${evidence}${why}${fix}
+      </article>`;
+    })
+    .join('');
+  const cats = Object.entries(byCategory)
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${esc(name)} — ${value}`)
+    .join(', ');
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>LDWarden — отчёт</title>
+<style>
+body{margin:0;padding:32px 20px;background:#faf4f6;color:#221a1d;font:14px/1.55 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:960px;margin:0 auto}h1{font-size:24px;margin:6px 0 18px}h2{font-size:16px;margin:26px 0 12px}h3{font-size:14px;margin:0 0 4px}
+h4{font-size:12px;margin:14px 0 4px;color:#7a6a70;text-transform:uppercase;letter-spacing:.04em}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}
+.stat{background:#fff;border:1px solid #ecd9df;border-radius:12px;padding:10px 12px}
+.stat b{display:block;font-size:22px}.stat span{font-size:11px;color:#7a6a70}
+.finding{background:#fff;border:1px solid #ecd9df;border-radius:12px;padding:14px 16px;margin-bottom:12px;break-inside:avoid}
+.finding.sev-critical{border-left:4px solid #b91c1c}.finding.sev-high{border-left:4px solid #dc2626}
+.finding.sev-medium{border-left:4px solid #d97706}.finding.sev-low{border-left:4px solid #2563eb}
+.top{display:flex;gap:8px;align-items:center;margin-bottom:6px}.top b{font-size:11px}
+.chip{font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:999px;background:#faf4f6;border:1px solid #ecd9df;color:#7a6a70}
+.path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#7a6a70}
+pre{margin:8px 0 0;padding:10px 12px;background:#fbf7f8;border:1px solid #ecd9df;border-radius:8px;overflow-x:auto;font-size:11.5px}
+.cats{color:#7a6a70;font-size:12px}footer{margin-top:28px;color:#7a6a70;font-size:11px;text-align:center}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}}
+</style></head><body><div class="wrap">
+<div><b style="font-size:20px">LDWarden</b> <span style="color:#7a6a70;font-size:12px">конструктор проверок безопасности</span></div>
+<h1>Отчёт о проверке безопасности</h1>
+<p class="cats">Источник: ${esc(meta.target || '—')} · ${esc(date)}</p>
+<div class="stats"><div class="stat"><b>${total}</b><span>Всего</span></div>
+<div class="stat"><b>${by.CRITICAL || 0}</b><span>Критическая</span></div>
+<div class="stat"><b>${by.HIGH || 0}</b><span>Высокая</span></div>
+<div class="stat"><b>${by.MEDIUM || 0}</b><span>Средняя</span></div>
+<div class="stat"><b>${by.LOW || 0}</b><span>Низкая</span></div></div>
+<p class="cats">Категории: ${cats || '—'}</p>
+<h2>Находки</h2>${cards || '<p class="cats">Находок нет — проверка чистая.</p>'}
+<footer>Сформировано LDWarden · ${esc(date)}</footer></div></body></html>`;
+}
+
 export function toMarkdown(findings, meta = {}) {
   const { by, byCategory, total } = summarize(findings);
   const date = new Date().toLocaleString('ru-RU', { dateStyle: 'long', timeStyle: 'short' });

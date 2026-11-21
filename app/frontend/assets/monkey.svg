@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80" role="img" aria-label="Обезьянка">
+  <g>
+    <path d="M 54 64 C 72 64 74 48 63 41" stroke="#6f4c33" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="40" cy="57" rx="14" ry="12.5" fill="#7a563a"/>
+    <path d="M 33 51 C 28 58 26 66 24 71" stroke="#7a563a" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <circle cx="23.5" cy="71.5" r="5" fill="#8a6344"/>
+    <path d="M 48 51 C 53 56 55 60 56 64" stroke="#7a563a" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <circle cx="22" cy="26" r="7" fill="#8a6344"/><circle cx="22" cy="26" r="3.6" fill="#e2c4a0"/>
+    <circle cx="58" cy="26" r="7" fill="#8a6344"/><circle cx="58" cy="26" r="3.6" fill="#e2c4a0"/>
+    <circle cx="40" cy="28" r="16" fill="#8a6344"/>
+    <ellipse cx="40" cy="32" rx="11.5" ry="12" fill="#e2c4a0"/>
+    <circle cx="35.5" cy="28" r="2.2" fill="#2e241d"/>
+    <circle cx="44.5" cy="28" r="2.2" fill="#2e241d"/>
+    <path d="M 40 32 v 2.5" stroke="#2e241d" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M 36 37 q 4 3.4 8 0" stroke="#2e241d" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>
