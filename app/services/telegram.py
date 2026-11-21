@@ -177,17 +177,18 @@ class TelegramService:
         graph = j_loads(row.graph, {"nodes": [], "edges": []})
         target = None
         for node in graph.get("nodes", []):
-            if node.get("type") != "notify.send":
+            if node.get("type") not in {"notify.telegram", "notify.send"}:
                 continue
             if node_id and node.get("id") != node_id:
                 continue
             target = node
             break
         if target is None:
-            raise TelegramError("В workflow нет ноды notify.send", 400)
+            raise TelegramError("В workflow нет ноды Telegram", 400)
         data = target.setdefault("data", {})
         params = data.get("params") if isinstance(data.get("params"), dict) else {}
-        params["channel"] = "telegram"
+        if target.get("type") == "notify.send":
+            params["channel"] = "telegram"
         params["chat_id"] = chat_id
         data["params"] = params
         row.graph = j_dumps(graph)

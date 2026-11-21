@@ -1,6 +1,6 @@
 {
   "name": "Telegram-отчёт",
-  "description": "Полный аудит с отправкой отчёта в Telegram. Заполните bot_token и chat_id в ноде notify.send.",
+  "description": "Полный аудит с отправкой отчёта в Telegram. Заполните bot_token и chat_id в ноде notify.telegram.",
   "graph": {
     "nodes": [
       {
@@ -91,17 +91,17 @@
       },
       {
         "id": "notify",
-        "type": "notify.send",
+        "type": "notify.telegram",
         "position": {
           "x": 1540.0,
           "y": 280.0
         },
         "data": {
-          "label": "Уведомление",
+          "label": "Telegram",
           "params": {
-            "channel": "telegram",
             "bot_token": "",
             "chat_id": "",
+            "subject": "LDWarden: отчёт о проверке",
             "attach_report": true,
             "dry_run": false
           }

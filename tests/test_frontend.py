@@ -20,6 +20,8 @@ class FrontendServingTests(unittest.TestCase):
         self.assertIn("text/html", response.content_type)
         self.assertIn("ldwarden", response.data.decode("utf-8").lower())
         self.assertIn("js/app.js", response.data.decode("utf-8"))
+        self.assertIn("workspaceTabs", response.data.decode("utf-8"))
+        self.assertIn("libraryView", response.data.decode("utf-8"))
         response.close()
 
     def test_static_assets_are_served(self):

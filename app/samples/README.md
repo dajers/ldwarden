@@ -8,7 +8,7 @@
 
 - `full-audit.workflow.json` — ручной запуск, три сканера в независимых ветках, AI, отчёт, уведомление в `local://inbox`.
 - `ci-gate.workflow.json` — webhook-триггер, те же сканеры, порог HIGH, отчёт и уведомление.
-- `telegram-report.workflow.json` — полный аудит с отправкой отчёта в Telegram; заполните `bot_token` и `chat_id` в ноде `notify.send`.
+- `telegram-report.workflow.json` — полный аудит с отправкой отчёта в Telegram; заполните `bot_token` и `chat_id` в ноде `notify.telegram`.
 
 Импорт:
 

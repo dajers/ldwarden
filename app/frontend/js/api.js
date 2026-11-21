@@ -17,6 +17,9 @@ const TYPE_TO_BACKEND = {
   'ai.explain': 'ai.analyze',
   'logic.branch': 'logic.if',
   'control.gate': 'control.severity_gate',
+  'notify.email': 'notify.email',
+  'notify.telegram': 'notify.telegram',
+  'notify.webhook': 'notify.webhook',
 };
 
 const TYPE_FROM_BACKEND = Object.fromEntries(
@@ -207,16 +210,52 @@ function mapParamsToBackend(node) {
     case 'ai.explain':
       return {
         provider: params.provider || 'auto',
-        max_findings: Number(params.maxFindings) || 12,
+        max_findings: Number(params.maxFindings) || 2,
         threads: Number(params.threads) || 4,
-        timeout: Number(params.timeout) || 45,
+        timeout: Number(params.timeout) || 180,
+      };
+    case 'notify.email':
+      return {
+        host: params.host || '',
+        port: Number(params.port) || 587,
+        username: params.username || '',
+        password: params.password || '',
+        from_addr: params.fromAddr || '',
+        to_addr: params.toAddr || '',
+        use_tls: params.useTls !== false,
+        use_ssl: Boolean(params.useSsl),
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attach_report: params.attachReport !== false,
+        dry_run: Boolean(params.dryRun),
+        fail_on_error: Boolean(params.failOnError),
+      };
+    case 'notify.telegram':
+      return {
+        bot_token: params.botToken || '',
+        chat_id: params.chatId || '',
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attach_report: params.attachReport !== false,
+        dry_run: Boolean(params.dryRun),
+        fail_on_error: Boolean(params.failOnError),
+      };
+    case 'notify.webhook':
+      return {
+        url: params.url || 'local://inbox',
+        method: params.method || 'POST',
+        secret: params.hmacSecret || '',
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attach_report: params.attachReport !== false,
+        dry_run: Boolean(params.dryRun),
+        fail_on_error: Boolean(params.failOnError),
       };
     case 'notify.send': {
       const channel = CHANNEL_TO_BACKEND[params.channel] || 'telegram';
       const base = {
         channel,
+        subject: params.subject || 'LDWarden: отчёт о проверке',
         attach_report: params.attachReport !== false,
         dry_run: Boolean(params.dryRun),
+        fail_on_error: Boolean(params.failOnError),
       };
       if (channel === 'telegram') {
         return { ...base, bot_token: params.token || '', chat_id: params.chatId || '' };
@@ -285,9 +324,46 @@ function mapParamsFromBackend(node) {
             ? 'GigaChat · API'
             : 'Qwen2.5-Coder 7B · локально',
         tone: 'Для разработчика',
-        maxFindings: params.max_findings || 12,
+        maxFindings: params.max_findings || 2,
         threads: params.threads || 4,
-        timeout: params.timeout || 45,
+        timeout: params.timeout || 180,
+        ...(params.timeout === 45 && params.max_findings === 12 && params.threads === 4
+          ? { maxFindings: 2, threads: 4, timeout: 180 }
+          : {}),
+      };
+    case 'notify.email':
+      return {
+        host: params.host || '',
+        port: params.port || 587,
+        username: params.username || '',
+        password: params.password || '',
+        fromAddr: params.from_addr || params.username || '',
+        toAddr: params.to_addr || '',
+        useTls: params.use_tls !== false,
+        useSsl: Boolean(params.use_ssl),
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attachReport: params.attach_report !== false,
+        dryRun: Boolean(params.dry_run),
+        failOnError: Boolean(params.fail_on_error),
+      };
+    case 'notify.telegram':
+      return {
+        botToken: params.bot_token || '',
+        chatId: params.chat_id || '',
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attachReport: params.attach_report !== false,
+        dryRun: Boolean(params.dry_run),
+        failOnError: Boolean(params.fail_on_error),
+      };
+    case 'notify.webhook':
+      return {
+        url: params.url || 'local://inbox',
+        method: params.method || 'POST',
+        hmacSecret: params.secret || '',
+        subject: params.subject || 'LDWarden: отчёт о проверке',
+        attachReport: params.attach_report !== false,
+        dryRun: Boolean(params.dry_run),
+        failOnError: Boolean(params.fail_on_error),
       };
     case 'notify.send': {
       const channel = CHANNEL_FROM_BACKEND[params.channel] || 'Telegram';
@@ -319,7 +395,7 @@ function execPort(port) {
 
 export function toBackendGraph(workflow) {
   const nodes = (workflow.nodes || [])
-    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || ['scan.sca', 'scan.sast', 'notify.send', 'report.build'].includes(node.type))
+    .filter((node) => TYPE_TO_BACKEND[node.type] || node.type.startsWith('trigger.') || ['scan.sca', 'scan.sast', 'notify.email', 'notify.telegram', 'notify.webhook', 'notify.send', 'report.build'].includes(node.type))
     .map((node) => ({
       id: node.id,
       type: TYPE_TO_BACKEND[node.type] || node.type,
@@ -352,15 +428,18 @@ export function fromBackendWorkflow(row) {
   const graph = (row && row.graph) || { nodes: [], edges: [] };
   const nodes = [];
   for (const node of graph.nodes || []) {
-    const frontType = TYPE_FROM_BACKEND[node.type] || node.type;
+    const params = node.data && node.data.params ? node.data.params : {};
+    let frontType = TYPE_FROM_BACKEND[node.type] || node.type;
+    if (node.type === 'notify.send') {
+      frontType = params.channel === 'telegram' ? 'notify.telegram' : params.channel === 'smtp' ? 'notify.email' : 'notify.webhook';
+    }
     if (
       !frontType.startsWith('trigger.') &&
-      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.send', 'report.build'].includes(frontType)
+      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.email', 'notify.telegram', 'notify.webhook', 'report.build'].includes(frontType)
     ) {
       continue;
     }
-    const params = node.data && node.data.params ? node.data.params : {};
-    const mapped = mapParamsFromBackend({ type: node.type, params });
+    const mapped = mapParamsFromBackend({ type: node.type === 'notify.send' ? frontType : node.type, params });
     const entry = {
       id: node.id,
       type: frontType,
@@ -487,6 +566,8 @@ async function buildResult(runId, workflow, liveFindings) {
       ? {
           summary: ai.summary || '',
           model: aiModel,
+          provider: ai.provider || '',
+          validation: ai.validation || {},
           items: aiItems,
         }
       : null,
@@ -756,6 +837,17 @@ async function telegramLink(state, chatId, workflowId) {
   });
 }
 
+async function libraryPresets(force = false) {
+  return request(`/library${force ? '?refresh=1' : ''}`);
+}
+
+async function publishLibraryPreset(workflowId, payload = {}) {
+  return request('/library/publish', {
+    method: 'POST',
+    body: { workflow_id: workflowId, ...payload },
+  });
+}
+
 async function health() {
   if (!remoteAvailable) return null;
   try {
@@ -770,6 +862,8 @@ export const api = {
   cancel,
   loadWorkflow,
   saveWorkflow,
+  libraryPresets,
+  publishLibraryPreset,
   health,
   telegramConnect,
   telegramChats,

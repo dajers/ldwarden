@@ -48,7 +48,7 @@ class AIAnalyzeNode(BaseNode):
             "number",
             "Сколько находок отдать модели",
             "Остальные получат детерминированное объяснение",
-            default=12,
+            default=2,
             min=1,
             max=200,
         ),
@@ -66,7 +66,7 @@ class AIAnalyzeNode(BaseNode):
             "number",
             "Таймаут AI, секунд",
             "После таймаута используется детерминированный fallback",
-            default=45,
+            default=180,
             min=5,
             max=600,
         ),
@@ -129,7 +129,7 @@ class AIAnalyzeNode(BaseNode):
             llm_temperature=float(params.get("temperature", settings.llm_temperature)),
         )
         service = AIService(effective, provider=provider)
-        timeout = int(params.get("timeout") or 45)
+        timeout = int(params.get("timeout") or 180)
         ctx.emit(
             "ai.started",
             f"AI-анализ запущен ({provider_name}, таймаут {timeout} с)",

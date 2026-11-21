@@ -18,6 +18,9 @@ const DELAY = {
   'scan.sast': 940,
   'ai.explain': 1150,
   'notify.send': 560,
+  'notify.email': 560,
+  'notify.telegram': 560,
+  'notify.webhook': 560,
   'report.build': 380,
   'logic.branch': 260,
   default: 260,
@@ -194,13 +197,24 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
         return { port: hit ? 'fail' : 'pass', chip: hit ? 'превышен' : 'пройден', output: { passed: !hit } };
       }
 
+      case 'notify.email':
+      case 'notify.telegram':
+      case 'notify.webhook':
       case 'notify.send': {
         const linked = dataInto(node.id, 'payload');
         const payload = linked ? ctx.outputs[linked.from.node] : null;
         const size = Array.isArray(payload) ? payload.length : ctx.findings.length;
         const dry = Boolean(node.params.dryRun);
-        ctx.notified = { channel: node.params.channel, findings: size, at: Date.now(), dryRun: dry };
-        return { port: 'out', chip: `${node.params.channel}${dry ? ' · dry-run' : ''} · ${size}`, output: { channel: node.params.channel, size, dryRun: dry } };
+        const channel =
+          node.type === 'notify.email'
+            ? 'email'
+            : node.type === 'notify.telegram'
+              ? 'telegram'
+              : node.type === 'notify.webhook'
+                ? 'webhook'
+                : node.params.channel;
+        ctx.notified = { channel, findings: size, at: Date.now(), dryRun: dry };
+        return { port: 'out', chip: `${channel}${dry ? ' · dry-run' : ''} · ${size}`, output: { channel, size, dryRun: dry } };
       }
 
       case 'report.build': {

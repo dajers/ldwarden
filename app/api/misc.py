@@ -38,6 +38,38 @@ from app.services.telegram import TelegramError
 bp = Blueprint("misc", __name__)
 
 
+def _llm_ready(settings_) -> bool:
+    provider = settings_.effective_llm_provider
+    if provider == "local":
+        if not settings_.llm_model_path.exists():
+            return False
+        try:
+            import llama_cpp  # noqa: F401
+        except Exception:
+            return False
+        return True
+    if provider in {"openai", "ollama"}:
+        return bool(settings_.llm_base_url and settings_.llm_model)
+    return provider in {"fake"}
+
+
+def _llm_error(settings_) -> str:
+    provider = settings_.effective_llm_provider
+    if provider == "local":
+        if not settings_.llm_model_path.exists():
+            return "Файл локальной модели не найден"
+        try:
+            import llama_cpp  # noqa: F401
+        except Exception:
+            return "Не установлен llama-cpp-python: ./venv/bin/pip install -r requirements-ai.txt"
+        return ""
+    if provider in {"openai", "ollama"} and not settings_.llm_base_url:
+        return "Не задан LDWARDEN_LLM_BASE_URL"
+    if provider == "none":
+        return "LLM отключена (provider=none) — используется fallback"
+    return ""
+
+
 @bp.get("/health")
 def health():
     settings_ = settings()
@@ -55,6 +87,8 @@ def health():
             "llm": {
                 "provider": settings_.effective_llm_provider,
                 "model": settings_.llm_model or settings_.llm_model_path.name,
+                "ready": _llm_ready(settings_),
+                "error": _llm_error(settings_),
             },
             "scheduler": {"enabled": settings_.enable_scheduler},
             "auth": {"api_token": bool(settings_.api_token), "ci_token": bool(settings_.ci_token)},
@@ -80,6 +114,7 @@ def meta():
                 "workflows": "/api/workflows",
                 "runs": "/api/runs",
                 "templates": "/api/templates",
+                "library": "/api/library",
                 "sources": "/api/sources",
                 "generate": "/api/ai/workflows/generate",
                 "ci": "/api/ci/run",

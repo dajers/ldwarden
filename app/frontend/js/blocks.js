@@ -295,28 +295,73 @@ export const NODE_TYPES = {
         def: 'Qwen2.5-Coder 7B · локально',
       },
       { key: 'tone', label: 'Тон объяснения', type: 'select', options: ['Для разработчика', 'Для менеджера'], def: 'Для разработчика' },
-      { key: 'maxFindings', label: 'Находок в LLM', type: 'number', def: 12, hint: 'Остальные получат детерминированное объяснение.' },
+      { key: 'maxFindings', label: 'Находок в LLM', type: 'number', def: 2, hint: 'Остальные получат детерминированное объяснение.' },
       { key: 'threads', label: 'Потоков CPU', type: 'number', def: 4, hint: 'Для локальной модели: меньше — тише, но медленнее.' },
-      { key: 'timeout', label: 'Таймаут, сек', type: 'number', def: 45, hint: 'После таймаута — fallback без зависания.' },
+      { key: 'timeout', label: 'Таймаут, сек', type: 'number', def: 180, hint: 'После таймаута — fallback без зависания.' },
     ],
   },
-  'notify.send': {
+  'notify.email': {
     cat: 'action',
     icon: 'send',
-    title: 'Уведомление',
-    sub: (p) => `${p.channel}${p.onlyCritical ? ' · только критичные' : ''}`,
+    title: 'Email',
+    sub: (p) => p.toAddr || 'получатель не задан',
     inputs: [
       { id: 'in', kind: 'exec', label: 'Вход' },
       { id: 'payload', kind: 'data', label: 'данные' },
     ],
     outputs: [{ id: 'out', kind: 'exec', label: 'Отправлено' }],
     params: [
-      { key: 'channel', label: 'Канал', type: 'select', options: ['Telegram', 'HTTP webhook', 'E-mail'], def: 'Telegram' },
-      { key: 'token', label: 'Токен / URL / пароль', type: 'secret', def: '', hint: 'Шифруется на бэкенде и маскируется в интерфейсе.' },
-      { key: 'hmacSecret', label: 'HMAC-секрет webhook', type: 'secret', def: '', hint: 'Подпись X-LDWarden-Signature; шифруется на сервере.' },
-      { key: 'chatId', label: 'Chat ID / адрес', type: 'text', def: '', hint: 'Для Telegram можно оставить пустым — возьмётся из .env или подключения.' },
+      { key: 'host', label: 'SMTP-хост', type: 'text', def: 'smtp.yandex.ru' },
+      { key: 'port', label: 'Порт', type: 'number', def: 587 },
+      { key: 'username', label: 'Логин', type: 'text', def: '' },
+      { key: 'password', label: 'Пароль приложения', type: 'secret', def: '', hint: 'Шифруется на сервере и маскируется в интерфейсе.' },
+      { key: 'fromAddr', label: 'От кого', type: 'text', def: '' },
+      { key: 'toAddr', label: 'Кому', type: 'text', def: '', hint: 'Можно несколько адресов через запятую.' },
+      { key: 'useTls', label: 'STARTTLS', type: 'toggle', def: true },
+      { key: 'useSsl', label: 'SMTPS (SSL)', type: 'toggle', def: false },
+      { key: 'subject', label: 'Тема', type: 'text', def: 'LDWarden: отчёт о проверке' },
       { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
       { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },
+      { key: 'failOnError', label: 'Ошибка доставки валит run', type: 'toggle', def: false },
+    ],
+  },
+  'notify.telegram': {
+    cat: 'action',
+    icon: 'send',
+    title: 'Telegram',
+    sub: (p) => p.chatId || 'чат не задан',
+    inputs: [
+      { id: 'in', kind: 'exec', label: 'Вход' },
+      { id: 'payload', kind: 'data', label: 'данные' },
+    ],
+    outputs: [{ id: 'out', kind: 'exec', label: 'Отправлено' }],
+    params: [
+      { key: 'botToken', label: 'Токен бота', type: 'secret', def: '', hint: 'Получить у @BotFather; шифруется на сервере.' },
+      { key: 'chatId', label: 'Chat ID', type: 'text', def: '', hint: 'Числовой ID, @username канала или пусто — возьмётся из подключения/.env.' },
+      { key: 'subject', label: 'Заголовок', type: 'text', def: 'LDWarden: отчёт о проверке' },
+      { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
+      { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },
+      { key: 'failOnError', label: 'Ошибка доставки валит run', type: 'toggle', def: false },
+    ],
+  },
+  'notify.webhook': {
+    cat: 'action',
+    icon: 'send',
+    title: 'HTTP webhook',
+    sub: (p) => p.url || 'URL не задан',
+    inputs: [
+      { id: 'in', kind: 'exec', label: 'Вход' },
+      { id: 'payload', kind: 'data', label: 'данные' },
+    ],
+    outputs: [{ id: 'out', kind: 'exec', label: 'Отправлено' }],
+    params: [
+      { key: 'url', label: 'URL', type: 'text', def: 'local://inbox', hint: 'http(s)://… или local://inbox для демо.' },
+      { key: 'method', label: 'Метод', type: 'select', options: ['POST', 'PUT'], def: 'POST' },
+      { key: 'hmacSecret', label: 'HMAC-секрет', type: 'secret', def: '', hint: 'Подпись X-LDWarden-Signature; шифруется.' },
+      { key: 'subject', label: 'Заголовок', type: 'text', def: 'LDWarden: отчёт о проверке' },
+      { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
+      { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },
+      { key: 'failOnError', label: 'Ошибка доставки валит run', type: 'toggle', def: false },
     ],
   },
   'report.build': {
@@ -421,7 +466,7 @@ export const PRESETS = [
       const trigger = createNode('trigger.schedule', 80, 240);
       const repo = createNode('source.repo', 380, 240);
       const secret = createNode('scan.secret', 680, 240);
-      const notify = createNode('notify.send', 980, 240);
+      const notify = createNode('notify.email', 980, 240, { dryRun: true });
       const edges = [
         connect(trigger, 'out', repo, 'in'),
         connect(repo, 'out', secret, 'in'),
@@ -439,7 +484,7 @@ export const PRESETS = [
       const repo = createNode('source.repo', 360, 260);
       const secret = createNode('scan.secret', 640, 260);
       const regex = createNode('logic.regex', 920, 260, { field: 'path', pattern: '\\.(ya?ml|properties|env|conf)$' });
-      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const notify = createNode('notify.webhook', 1200, 160, { url: 'local://inbox' });
       const report = createNode('report.build', 1200, 380);
       const edges = [
         connect(trigger, 'out', repo, 'in'),
@@ -460,7 +505,7 @@ export const PRESETS = [
       const repo = createNode('source.repo', 360, 260);
       const sast = createNode('scan.sast', 640, 260);
       const regex = createNode('logic.regex', 920, 260, { field: 'class', pattern: 'route-authorization|object-authorization' });
-      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const notify = createNode('notify.webhook', 1200, 160, { url: 'local://inbox' });
       const report = createNode('report.build', 1200, 380);
       const edges = [
         connect(trigger, 'out', repo, 'in'),
@@ -481,7 +526,7 @@ export const PRESETS = [
       const repo = createNode('source.repo', 360, 260);
       const sca = createNode('scan.sca', 640, 260);
       const regex = createNode('logic.regex', 920, 260, { field: 'message', pattern: 'CVE-\\d{4}-\\d{4,}' });
-      const notify = createNode('notify.send', 1200, 160, { channel: 'HTTP webhook', token: 'local://inbox' });
+      const notify = createNode('notify.webhook', 1200, 160, { url: 'local://inbox' });
       const report = createNode('report.build', 1200, 380);
       const edges = [
         connect(trigger, 'out', repo, 'in'),
@@ -505,7 +550,7 @@ export const PRESETS = [
       const sast = createNode('scan.sast', 640, 540);
       const ai = createNode('ai.explain', 940, 360);
       const branch = createNode('logic.branch', 1220, 360);
-      const notify = createNode('notify.send', 1500, 260);
+      const notify = createNode('notify.email', 1500, 260, { dryRun: true });
       const report = createNode('report.build', 1500, 480);
       const edges = [
         connect(trigger, 'out', repo, 'in'),

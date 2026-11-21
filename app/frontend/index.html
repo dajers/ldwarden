@@ -107,7 +107,53 @@
     </div>
   </header>
 
-  <main class="layout">
+  <nav class="workspace-tabs" id="workspaceTabs" aria-label="Разделы приложения">
+    <button class="workspace-tab is-active" type="button" data-workspace="graph">Конструктор</button>
+    <button class="workspace-tab" type="button" data-workspace="presets">Пресеты</button>
+    <button class="workspace-tab" type="button" data-workspace="library">Библиотека</button>
+  </nav>
+
+  <section class="workspace-page" id="presetsView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">Библиотека сценариев</span>
+        <h1>Пресеты</h1>
+        <p>Встроенные и свои сценарии. Изменения активного пресета сохраняются автоматически.</p>
+      </div>
+      <div class="workspace-page__actions">
+        <input id="presetImportInput" type="file" accept=".json,application/json" hidden />
+        <button class="btn btn--ghost" id="presetImportBtn" type="button">Импорт</button>
+        <button class="btn btn--ghost" id="presetExportBtn" type="button">Экспорт</button>
+        <button class="btn btn--primary" id="presetCreateBtn" type="button">+ Создать пресет</button>
+      </div>
+    </div>
+    <div class="workspace-page__search">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input class="input" id="presetSearch" type="search" placeholder="Поиск пресета по названию…" autocomplete="off" />
+    </div>
+    <div class="preset-grid" id="presetsGrid"></div>
+  </section>
+
+  <section class="workspace-page" id="libraryView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">GitHub-библиотека</span>
+        <h1>Библиотека</h1>
+        <p id="libraryRepoLine">Загрузка…</p>
+      </div>
+      <div class="workspace-page__actions">
+        <button class="btn btn--ghost" id="libraryRefreshBtn" type="button">Обновить</button>
+        <button class="btn btn--primary" id="libraryPublishBtn" type="button">Опубликовать текущий</button>
+      </div>
+    </div>
+    <div class="workspace-page__search">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input class="input" id="librarySearch" type="search" placeholder="Поиск по названию, описанию или тегу…" autocomplete="off" />
+    </div>
+    <div id="libraryGrid" class="library-grid"></div>
+  </section>
+
+  <main class="layout" id="graphLayout">
     <aside class="panel palette" aria-label="Палитра блоков">
       <div class="panel__head">
         <h2>Блоки</h2>
@@ -117,7 +163,7 @@
 
     <section class="panel canvas" aria-label="Рабочая область">
       <div class="canvas__head">
-        <div class="presets" id="presets"></div>
+        <div class="canvas__label">Конструктор</div>
         <div class="canvas__status" aria-live="polite">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Готов к запуску</span>

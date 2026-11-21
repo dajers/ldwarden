@@ -40,11 +40,11 @@ def _full_audit_graph() -> dict:
                 _node("report", "report.build", 1240, 280, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.send",
+                    "notify.email",
                     1540,
                     280,
-                    "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox", "attach_report": True},
+                    "Email",
+                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
                 ),
             ],
             "edges": [
@@ -73,11 +73,11 @@ def _secrets_only_graph() -> dict:
                 _node("report", "report.build", 1220, 200, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.send",
+                    "notify.email",
                     1520,
                     200,
-                    "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    "Email",
+                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
                 ),
             ],
             "edges": [
@@ -119,11 +119,11 @@ def _ci_gate_graph() -> dict:
                 _node("report", "report.build", 1540, 300, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.send",
+                    "notify.webhook",
                     1840,
                     300,
-                    "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    "HTTP webhook",
+                    {"url": "local://inbox", "attach_report": True},
                 ),
             ],
             "edges": [
@@ -163,11 +163,11 @@ def _daily_graph() -> dict:
                 _node("report", "report.build", 1240, 280, "Отчёт"),
                 _node(
                     "notify",
-                    "notify.send",
+                    "notify.email",
                     1540,
                     280,
-                    "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    "Email",
+                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
                 ),
             ],
             "edges": [
@@ -212,11 +212,11 @@ def _quick_smoke_graph() -> dict:
                 ),
                 _node(
                     "notify",
-                    "notify.send",
+                    "notify.email",
                     1540,
                     280,
-                    "Уведомление",
-                    {"channel": "webhook", "url": "local://inbox"},
+                    "Email",
+                    {"host": "", "port": 587, "to_addr": "", "attach_report": True, "dry_run": True},
                 ),
             ],
             "edges": [
@@ -241,7 +241,7 @@ BUILTIN_TEMPLATES: list[dict] = [
         "name": "Полный аудит перед мержем",
         "description": (
             "Три собственных анализатора (секреты, SCA, SAST) в независимых ветках, AI-объяснение, "
-            "Markdown/JSON/SARIF и уведомление в демо-inbox."
+            "Markdown/JSON/SARIF и email-уведомление в dry-run."
         ),
         "tags": ["full", "audit", "ai"],
         "graph": _full_audit_graph,
@@ -249,7 +249,7 @@ BUILTIN_TEMPLATES: list[dict] = [
     {
         "id": "tpl-secrets-only",
         "name": "Только секреты",
-        "description": "Быстрый поиск паролей, API-ключей, токенов и приватных ключей с AI-рекомендациями.",
+        "description": "Быстрый поиск паролей, API-ключей, токенов и приватных ключей с AI-рекомендациями и email dry-run.",
         "tags": ["secrets", "fast"],
         "graph": _secrets_only_graph,
     },
@@ -257,8 +257,8 @@ BUILTIN_TEMPLATES: list[dict] = [
         "id": "tpl-ci-gate",
         "name": "CI/CD: PR gate",
         "description": (
-            "Запуск по webhook из пайплайна, все сканеры, порог HIGH и блокировка сборки "
-            "при критических находках."
+            "Запуск по webhook из пайплайна, все сканеры, порог HIGH, блокировка сборки "
+            "при критических находках и уведомление через HTTP webhook."
         ),
         "tags": ["ci", "gate", "webhook"],
         "graph": _ci_gate_graph,
@@ -266,7 +266,7 @@ BUILTIN_TEMPLATES: list[dict] = [
     {
         "id": "tpl-daily-audit",
         "name": "Ежедневный аудит в 14:00",
-        "description": "Запуск по расписанию каждый день в 14:00 UTC, полный отчёт и уведомление.",
+        "description": "Запуск по расписанию каждый день в 14:00 UTC, полный отчёт и email dry-run.",
         "tags": ["schedule", "daily"],
         "graph": _daily_graph,
     },

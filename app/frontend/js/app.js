@@ -292,6 +292,15 @@ const state = {
   activeFindingId: null,
   tab: 'findings',
   history: loadHistory(),
+  activePresetId: null,
+  workspaceView: 'graph',
+  presetQuery: '',
+  libraryQuery: '',
+  libraryData: null,
+  libraryItems: [],
+  libraryAt: 0,
+  libraryLoading: false,
+  libraryError: '',
 };
 
 let customPresets = loadCustomPresets();
@@ -317,7 +326,8 @@ async function hydrateRemote() {
     const health = await api.health();
     if (health && health.llm) {
       const provider = health.llm.provider || 'none';
-      const label = { local: 'AI · локальная модель', fake: 'AI · тест', openai: 'AI · API', ollama: 'AI · Ollama', none: 'AI · fallback' }[provider] || `AI · ${provider}`;
+      let label = { local: 'AI · локальная модель', fake: 'AI · тест', openai: 'AI · API', ollama: 'AI · Ollama', none: 'AI · fallback' }[provider] || `AI · ${provider}`;
+      if (provider === 'local' && health.llm.ready === false) label = 'AI · fallback (нет llama-cpp)';
       setAiPill(label);
     }
   } catch {
@@ -330,6 +340,7 @@ async function hydrateRemote() {
       state.selectedNode = null;
       state.selectedNodes = [];
       state.selectedEdge = null;
+      state.activePresetId = null;
       resetStatuses();
       renderAll();
       fitView();
@@ -367,12 +378,59 @@ async function syncRemote() {
   }
 }
 
+function migrateLegacyNotify(node) {
+  if (!node || node.type !== 'notify.send') return node;
+  const params = node.params || {};
+  const channel = String(params.channel || '').toLowerCase();
+  if (channel === 'telegram') {
+    return { ...node, type: 'notify.telegram', params: {
+      botToken: params.botToken || params.bot_token || params.token || '',
+      chatId: params.chatId || params.chat_id || '',
+      subject: params.subject || 'LDWarden: отчёт о проверке',
+      attachReport: params.attachReport !== false,
+      dryRun: Boolean(params.dryRun || params.dry_run),
+      failOnError: Boolean(params.failOnError || params.fail_on_error),
+    } };
+  }
+  if (channel === 'e-mail' || channel === 'email' || channel === 'smtp') {
+    return { ...node, type: 'notify.email', params: {
+      host: params.host || 'smtp.yandex.ru',
+      port: params.port || 587,
+      username: params.username || '',
+      password: params.password || params.token || '',
+      fromAddr: params.fromAddr || params.from_addr || '',
+      toAddr: params.toAddr || params.to_addr || params.chatId || '',
+      useTls: params.useTls !== false,
+      useSsl: Boolean(params.useSsl || params.use_ssl),
+      subject: params.subject || 'LDWarden: отчёт о проверке',
+      attachReport: params.attachReport !== false,
+      dryRun: Boolean(params.dryRun || params.dry_run),
+      failOnError: Boolean(params.failOnError || params.fail_on_error),
+    } };
+  }
+  return { ...node, type: 'notify.webhook', params: {
+    url: params.url || params.token || 'local://inbox',
+    method: params.method || 'POST',
+    hmacSecret: params.hmacSecret || params.secret || '',
+    subject: params.subject || 'LDWarden: отчёт о проверке',
+    attachReport: params.attachReport !== false,
+    dryRun: Boolean(params.dryRun || params.dry_run),
+    failOnError: Boolean(params.failOnError || params.fail_on_error),
+  } };
+}
+
 function normalizeGraph(raw) {
-  const nodes = Array.isArray(raw && raw.nodes) ? raw.nodes.filter((n) => n && NODE_TYPES[n.type]) : [];
+  const sourceNodes = Array.isArray(raw && raw.nodes) ? raw.nodes.map(migrateLegacyNotify) : [];
+  const nodes = sourceNodes.filter((n) => n && NODE_TYPES[n.type]);
   const normalized = nodes.map((n) => {
     const def = NODE_TYPES[n.type];
     const params = {};
     for (const p of def.params) params[p.key] = n.params && p.key in n.params ? n.params[p.key] : p.def;
+    if (n.type === 'ai.explain' && params.timeout === 45 && params.maxFindings === 12 && params.threads === 4) {
+      params.timeout = 180;
+      params.maxFindings = 2;
+      params.threads = 4;
+    }
     if (n.type === 'logic.branch') {
       const fields = { total: 'findings.total', critical: 'findings.CRITICAL', secret: 'findings.by_category.SECRET' };
       const operators = { '>=': 'gte', '==': 'eq', '<=': 'lte', '>': 'gt' };
@@ -420,12 +478,30 @@ function loadWorkflow() {
 function localSnapshot(workflow) {
   const copy = clone(workflow);
   for (const node of copy.nodes || []) {
-    if (node.type === 'notify.send' && node.params && node.params.token) node.params.token = '••••••';
     if (node.type === 'source.repo' && node.params && node.params.gitToken) node.params.gitToken = '••••••';
-    if (node.type === 'notify.send' && node.params && node.params.hmacSecret) node.params.hmacSecret = '••••••';
+    if (node.type === 'notify.email' && node.params && node.params.password) node.params.password = '••••••';
+    if (node.type === 'notify.telegram' && node.params && node.params.botToken) node.params.botToken = '••••••';
+    if (node.type === 'notify.webhook' && node.params && node.params.hmacSecret) node.params.hmacSecret = '••••••';
+    if (node.type === 'notify.send' && node.params) {
+      if (node.params.token) node.params.token = '••••••';
+      if (node.params.hmacSecret) node.params.hmacSecret = '••••••';
+    }
     if (node.type === 'trigger.webhook' && node.params && node.params.secret) node.params.secret = '••••••';
   }
   return copy;
+}
+
+function updateActivePreset() {
+  if (!state.activePresetId) return;
+  const preset = customPresets.find((item) => item.id === state.activePresetId);
+  if (!preset) return;
+  const snapshot = localSnapshot(state.workflow);
+  preset.workflow = {
+    name: preset.name,
+    nodes: clone(snapshot.nodes),
+    edges: clone(snapshot.edges),
+  };
+  saveCustomPresets();
 }
 
 function saveWorkflow() {
@@ -434,6 +510,7 @@ function saveWorkflow() {
   } catch {
     /* приватный режим */
   }
+  updateActivePreset();
   if (!api.isRemote || !state.workflow.nodes.length) return;
   setSavePill('Сохраняем…');
   clearTimeout(syncTimer);
@@ -585,6 +662,7 @@ function saveCurrentAsPreset() {
     },
   };
   customPresets = [...customPresets.filter((item) => item.name !== preset.name), preset].slice(-20);
+  state.activePresetId = preset.id;
   saveCustomPresets();
   renderPresets();
   toast(`Пресет «${preset.name}» сохранён`, 'ok');
@@ -595,87 +673,150 @@ function deleteCustomPreset(id) {
   if (!preset) return;
   if (!window.confirm(`Удалить пресет «${preset.name}»?`)) return;
   customPresets = customPresets.filter((item) => item.id !== id);
+  if (state.activePresetId === id) state.activePresetId = null;
   saveCustomPresets();
   renderPresets();
   toast(`Пресет «${preset.name}» удалён`, 'ok');
 }
 
-function closePresets() {
-  const root = $('#presets');
-  if (!root) return;
-  root.classList.remove('is-open');
-  const trigger = root.querySelector('.preset-trigger');
-  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+function presetBundle(presets) {
+  return {
+    format: 'ldwarden-presets/v1',
+    exported_at: new Date().toISOString(),
+    presets: presets.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      workflow: {
+        name: preset.workflow.name,
+        nodes: preset.workflow.nodes,
+        edges: preset.workflow.edges,
+      },
+    })),
+  };
+}
+
+function exportPreset(preset) {
+  if (!preset || !preset.workflow) return;
+  download(
+    `ldwarden-preset-${preset.name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 50) || 'preset'}.json`,
+    JSON.stringify(presetBundle([preset]), null, 2),
+    'application/json',
+  );
+  toast(`Пресет «${preset.name}» выгружен`, 'ok');
+}
+
+function exportCustomPresets() {
+  if (!customPresets.length) {
+    toast('Сначала создайте свой пресет', 'warn');
+    return;
+  }
+  download('ldwarden-presets.json', JSON.stringify(presetBundle(customPresets), null, 2), 'application/json');
+  toast(`Выгружено пресетов: ${customPresets.length}`, 'ok');
+}
+
+function normalizeImportedPreset(raw) {
+  if (!raw || typeof raw !== 'object' || !raw.name || !raw.workflow) return null;
+  const nodes = Array.isArray(raw.workflow.nodes) ? raw.workflow.nodes : [];
+  const edges = Array.isArray(raw.workflow.edges) ? raw.workflow.edges : [];
+  if (!nodes.length) return null;
+  return {
+    id: String(raw.id || 'custom-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e5)),
+    name: String(raw.name).trim().slice(0, 60) || 'Импортированный пресет',
+    workflow: {
+      name: String(raw.workflow.name || raw.name).trim().slice(0, 60) || 'Импортированный пресет',
+      nodes: clone(nodes),
+      edges: clone(edges),
+    },
+  };
+}
+
+async function importCustomPresets(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const list = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.presets) ? parsed.presets : [parsed];
+    const incoming = list.map(normalizeImportedPreset).filter(Boolean);
+    if (!incoming.length) throw new Error('В файле нет валидных пресетов');
+    const byName = new Map(customPresets.map((preset) => [preset.name, preset]));
+    for (const preset of incoming) byName.set(preset.name, preset);
+    customPresets = [...byName.values()].slice(-50);
+    saveCustomPresets();
+    renderPresets();
+    toast(`Импортировано пресетов: ${incoming.length}`, 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось импортировать пресеты', 'warn');
+  }
 }
 
 function renderPresets() {
-  const root = $('#presets');
-  const wasOpen = root.classList.contains('is-open');
-
-  const trigger = h(
-    'button',
-    { class: 'preset-trigger', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': wasOpen ? 'true' : 'false' },
-    h('span', { text: 'Пресеты' }),
-    svgIcon('chevron'),
-  );
-  trigger.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const next = !root.classList.contains('is-open');
-    root.classList.toggle('is-open', next);
-    trigger.setAttribute('aria-expanded', String(next));
+  const root = $('#presetsGrid');
+  if (!root) return;
+  const query = state.presetQuery.trim().toLowerCase();
+  const builtin = PRESETS.map((preset) => ({ preset, builtin: true }));
+  const custom = customPresets.map((preset) => ({ preset, builtin: false, source: preset.source || 'custom' }));
+  const items = [...builtin, ...custom].filter(({ preset }) => {
+    if (!query) return true;
+    return `${preset.name} ${preset.description || ''}`.toLowerCase().includes(query);
   });
+  root.replaceChildren();
 
-  const menu = h('div', { class: 'preset-menu', role: 'menu' });
-
-  const addItem = (preset) => {
-    const item = h(
-      'button',
-      { class: 'preset-item', type: 'button', role: 'menuitem' },
-      h('span', { class: 'preset-item__name', text: preset.name }),
+  if (!items.length) {
+    root.append(
+      h('div', { class: 'workspace-empty' },
+        h('h3', { text: query ? 'Ничего не найдено' : 'Пока нет пресетов' }),
+        h('p', { text: query ? 'Попробуйте другой запрос.' : 'Создайте пресет из текущего сценария или импортируйте JSON.' })),
     );
-    item.addEventListener('click', () => {
-      applyPreset(preset);
-      closePresets();
-    });
-    if (preset.workflow) {
-      const remove = h('span', { class: 'preset-item__remove', role: 'button', tabindex: '0', title: 'Удалить пресет', text: '×' });
-      const removePreset = (event) => {
-        event.stopPropagation();
-        deleteCustomPreset(preset.id);
-      };
-      remove.addEventListener('click', removePreset);
-      remove.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          removePreset(event);
-        }
-      });
-      item.append(remove);
+    return;
+  }
+
+  for (const { preset, builtin: isBuiltin, source } of items) {
+    const workflow = isBuiltin ? preset.build() : preset.workflow;
+    const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+    const edges = Array.isArray(workflow.edges) ? workflow.edges : [];
+    const active = !isBuiltin && state.activePresetId === preset.id;
+    const badge = isBuiltin ? 'Встроенный' : source === 'library' ? 'Из библиотеки' : 'Мой';
+    const card = h('article', { class: 'preset-card' + (active ? ' is-active' : '') },
+      h('div', { class: 'preset-card__top' },
+        h('span', { class: 'preset-card__badge', text: badge }),
+        active ? h('span', { class: 'preset-card__active', text: 'активный' }) : null),
+      h('h2', { class: 'preset-card__title', text: preset.name }),
+      h('p', { class: 'preset-card__meta', text: `${nodes.length} ${plural(nodes.length, 'узел', 'узла', 'узлов')} · ${edges.length} ${plural(edges.length, 'связь', 'связи', 'связей')}` }),
+    );
+    const actions = h('div', { class: 'preset-card__actions' });
+    const open = h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Открыть' });
+    open.addEventListener('click', () => applyPreset(preset));
+    actions.append(open);
+    if (!isBuiltin) {
+      const downloadPreset = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Скачать' });
+      downloadPreset.addEventListener('click', () => exportPreset(preset));
+      const remove = h('button', { class: 'icon-btn', type: 'button', title: 'Удалить пресет', 'aria-label': 'Удалить пресет' }, svgIcon('trash'));
+      remove.addEventListener('click', () => deleteCustomPreset(preset.id));
+      actions.append(downloadPreset, remove);
     }
-    menu.append(item);
-  };
-
-  if (PRESETS.length) {
-    menu.append(h('div', { class: 'preset-menu__label', text: 'Встроенные' }));
-    for (const preset of PRESETS) addItem(preset);
+    card.append(actions);
+    root.append(card);
   }
-  if (customPresets.length) {
-    menu.append(h('div', { class: 'preset-menu__label', text: 'Мои пресеты' }));
-    for (const preset of customPresets) addItem(preset);
+}
+
+function showWorkspace(view) {
+  state.workspaceView = view;
+  const isGraph = view === 'graph';
+  const isPresets = view === 'presets';
+  const isLibrary = view === 'library';
+  $('#graphLayout').hidden = !isGraph;
+  $('#presetsView').hidden = !isPresets;
+  $('#libraryView').hidden = !isLibrary;
+  for (const tab of $$('#workspaceTabs .workspace-tab')) {
+    tab.classList.toggle('is-active', tab.dataset.workspace === view);
   }
-
-  const add = h('button', { class: 'preset-item preset-item--add', type: 'button', role: 'menuitem', text: '+ Создать пресет' });
-  add.addEventListener('click', () => {
-    closePresets();
-    saveCurrentAsPreset();
-  });
-  menu.append(add);
-
-  root.replaceChildren(trigger, menu);
-  root.classList.toggle('is-open', wasOpen);
+  if (isPresets) renderPresets();
+  if (isLibrary) openLibraryView();
+  if (!isGraph) clearSelection();
 }
 
 function applyPreset(preset) {
+  state.activePresetId = null;
   if (preset.workflow) {
     state.workflow = normalizeGraph({
       id: 'wf-' + Date.now().toString(36),
@@ -694,6 +835,8 @@ function applyPreset(preset) {
   renderAll();
   fitView();
   saveWorkflow();
+  state.activePresetId = preset.workflow ? preset.id : null;
+  showWorkspace('graph');
   toast(`Пресет «${preset.name}» загружен`, 'ok');
 }
 
@@ -1013,7 +1156,7 @@ function renderInspector() {
   for (const param of def.params) body.append(renderField(node, param));
   if (node.type === 'logic.custom') body.append(h('p', { class: 'field__hint expr-hint', id: 'exprHint' }));
   body.append(renderNodeColor(node));
-  if (api.isRemote && node.type === 'notify.send' && node.params.channel === 'Telegram') {
+  if (api.isRemote && node.type === 'notify.telegram') {
     const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
     connect.addEventListener('click', () => connectTelegram(node));
     body.append(
@@ -1868,6 +2011,14 @@ function renderAiView() {
       h('span', { class: 'ai-hero__icon' }, svgIcon('sparkles')),
       h('div', {}, h('h3', { text: 'Сводка по проверке' }), h('p', { text: run.ai.summary }), h('p', { class: 'field__hint', text: `Модель: ${run.ai.model}` }))),
   );
+  if (run.ai.provider === 'fallback' || (run.ai.validation && run.ai.validation.errors && run.ai.validation.errors.length)) {
+    const errors = (run.ai.validation && run.ai.validation.errors) || [];
+    root.append(
+      h('div', { class: 'ai-warning' },
+        h('b', { text: 'Использован детерминированный fallback' }),
+        h('p', { text: errors.length ? errors.slice(0, 3).join(' · ') : 'LLM не ответила или ответ не прошёл проверку.' })),
+    );
+  }
 
   const list = h('div', { class: 'ai-list' });
   run.ai.items.forEach((item, index) => {
@@ -1910,6 +2061,7 @@ function setTab(tab) {
 /* ------------------------------------------------------------------ */
 
 function openModal() {
+  $('#modalTitle').textContent = 'История запусков';
   const root = $('#modalBody');
   root.replaceChildren();
 
@@ -1953,6 +2105,144 @@ function openModal() {
   }
 
   $('#modal').hidden = false;
+}
+
+function openLibraryView() {
+  renderLibraryPage();
+  const stale = !state.libraryAt || Date.now() - state.libraryAt > 60000;
+  if ((!state.libraryData || stale) && !state.libraryLoading) loadLibrary(false);
+}
+
+async function loadLibrary(force = false) {
+  if (state.libraryLoading) return;
+  state.libraryLoading = true;
+  state.libraryError = '';
+  if (!state.libraryData) renderLibraryPage();
+  try {
+    const data = await api.libraryPresets(force);
+    state.libraryData = data;
+    state.libraryItems = Array.isArray(data.items) ? data.items : [];
+    state.libraryAt = Date.now();
+  } catch (error) {
+    state.libraryError = error && error.message ? error.message : 'Не удалось получить библиотеку';
+  } finally {
+    state.libraryLoading = false;
+    if (state.workspaceView === 'library') renderLibraryPage();
+    if (state.workspaceView === 'presets') renderPresets();
+  }
+}
+
+function renderLibraryPage() {
+  const root = $('#libraryGrid');
+  const repoLine = $('#libraryRepoLine');
+  if (!root) return;
+  const data = state.libraryData;
+  const publishButton = $('#libraryPublishBtn');
+  if (publishButton) publishButton.disabled = !data || !data.publish_enabled || state.libraryLoading;
+  if (repoLine) {
+    if (!data) {
+      repoLine.textContent = state.libraryError || 'Загрузка пресетов из GitHub…';
+    } else if (!data.configured) {
+      repoLine.textContent = data.error || 'GitHub-репозиторий не настроен. Укажите LDWARDEN_LIBRARY_REPO в .env.';
+    } else {
+      const when = state.libraryAt ? new Date(state.libraryAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+      repoLine.textContent = `${data.repo} · ${data.branch || 'main'} / ${data.path || 'presets'}${when ? ` · кеш ${when}` : ''}${data.publish_enabled ? '' : ' · публикация недоступна без токена'}`;
+    }
+  }
+  root.replaceChildren();
+
+  if (state.libraryError && !data) {
+    root.append(h('div', { class: 'workspace-empty' },
+      h('h3', { text: 'Библиотека недоступна' }),
+      h('p', { text: state.libraryError }),
+      h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Повторить', onclick: () => loadLibrary(true) })));
+    return;
+  }
+  if (!data) {
+    root.append(h('div', { class: 'workspace-empty' }, h('p', { text: 'Загружаем пресеты…' })));
+    return;
+  }
+  if (!data.configured) {
+    root.append(h('div', { class: 'workspace-empty' },
+      h('h3', { text: 'Подключите GitHub-библиотеку' }),
+      h('p', { text: 'Создайте репозиторий и добавьте в .env:' }),
+      h('pre', { class: 'library-code', text: 'LDWARDEN_LIBRARY_REPO=your-org/ldwarden-presets\nLDWARDEN_LIBRARY_BRANCH=main\nLDWARDEN_LIBRARY_PATH=presets\nLDWARDEN_LIBRARY_TOKEN=github_pat_...' }),
+      h('p', { class: 'field__hint', text: 'Токен нужен для публикации; для чтения публичного репозитория можно оставить пустым.' })));
+    return;
+  }
+  const query = state.libraryQuery.trim().toLowerCase();
+  const items = state.libraryItems.filter((item) => {
+    if (!query) return true;
+    return `${item.name || ''} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(query);
+  });
+  if (!items.length) {
+    root.append(h('div', { class: 'workspace-empty' },
+      h('h3', { text: query ? 'Ничего не найдено' : 'В библиотеке пока пусто' }),
+      h('p', { text: query ? 'Попробуйте другой запрос.' : 'Опубликуйте первый сценарий кнопкой «Опубликовать текущий».' })));
+    return;
+  }
+  for (const item of items) {
+    const tags = (item.tags || []).map((tag) => h('span', { class: 'library-tag', text: tag }));
+    const card = h('article', { class: 'preset-card library-card' },
+      h('div', { class: 'preset-card__top' },
+        h('span', { class: 'preset-card__badge', text: 'GitHub' }),
+        item.author ? h('span', { class: 'preset-card__active', text: item.author }) : null),
+      h('h2', { class: 'preset-card__title', text: item.name || 'Без названия' }),
+      item.description ? h('p', { class: 'library-card__text', text: item.description }) : null,
+      tags.length ? h('div', { class: 'library-tags' }, ...tags) : null,
+      h('div', { class: 'preset-card__actions' },
+        h('span', { class: 'field__hint', text: item.updated_at ? String(item.updated_at).slice(0, 10) : '' }),
+        h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Добавить в пресеты', onclick: () => addLibraryPreset(item) })),
+    );
+    root.append(card);
+  }
+}
+
+function addLibraryPreset(item) {
+  try {
+    const imported = api.fromBackendWorkflow({ id: item.id, name: item.name, graph: item.graph });
+    if (!imported.nodes.length) throw new Error('В пресете нет узлов');
+    const baseName = String(item.name || 'Пресет из библиотеки').slice(0, 60);
+    let name = baseName;
+    let index = 2;
+    while (customPresets.some((preset) => preset.name === name)) name = `${baseName} (${index++})`;
+    const preset = {
+      id: 'library-' + Date.now().toString(36),
+      name,
+      source: 'library',
+      workflow: { name, nodes: imported.nodes, edges: imported.edges },
+    };
+    customPresets = [...customPresets, preset].slice(-50);
+    saveCustomPresets();
+    renderPresets();
+    toast(`«${name}» добавлен в пресеты`, 'ok');
+    showWorkspace('presets');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось добавить пресет', 'warn');
+  }
+}
+
+async function publishCurrentToLibrary() {
+  const name = window.prompt('Название шаблона в библиотеке', state.workflow.name || 'Мой шаблон');
+  if (!name || !name.trim()) return;
+  const description = window.prompt('Описание (необязательно)', '') || '';
+  const tagsText = window.prompt('Теги через запятую', '') || '';
+  try {
+    const saved = await api.saveWorkflow(state.workflow);
+    if (!saved || !saved.id) throw new Error('Не удалось сохранить сценарий на сервере');
+    const workflowId = saved.id;
+    state.workflow.backendId = workflowId;
+    const result = await api.publishLibraryPreset(workflowId, {
+      name: name.trim(),
+      description,
+      tags: tagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
+    });
+    toast(`Опубликовано: ${result.path || name}`, 'ok');
+    await loadLibrary(true);
+    renderLibraryPage();
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось опубликовать шаблон', 'warn');
+  }
 }
 
 function closeModal() {
@@ -2003,15 +2293,30 @@ async function exportHtml() {
 /* ------------------------------------------------------------------ */
 
 function bindEvents() {
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('#presets')) closePresets();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closePresets();
-  });
+  for (const tab of $$('#workspaceTabs .workspace-tab')) {
+    tab.addEventListener('click', () => showWorkspace(tab.dataset.workspace));
+  }
   $('#runBtn').addEventListener('click', startRun);
   $('#historyBtn').addEventListener('click', openModal);
   $('#closeDrawer').addEventListener('click', closeDrawer);
+  $('#presetCreateBtn').addEventListener('click', saveCurrentAsPreset);
+  $('#presetExportBtn').addEventListener('click', exportCustomPresets);
+  $('#presetImportBtn').addEventListener('click', () => $('#presetImportInput').click());
+  $('#presetImportInput').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    await importCustomPresets(file);
+  });
+  $('#presetSearch').addEventListener('input', (event) => {
+    state.presetQuery = event.target.value;
+    renderPresets();
+  });
+  $('#libraryRefreshBtn').addEventListener('click', () => loadLibrary(true));
+  $('#libraryPublishBtn').addEventListener('click', publishCurrentToLibrary);
+  $('#librarySearch').addEventListener('input', (event) => {
+    state.libraryQuery = event.target.value;
+    renderLibraryPage();
+  });
   $('#exportJson').addEventListener('click', exportJson);
   $('#exportMd').addEventListener('click', exportMarkdown);
   $('#exportHtml').addEventListener('click', exportHtml);

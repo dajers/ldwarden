@@ -91,17 +91,18 @@
       },
       {
         "id": "notify",
-        "type": "notify.send",
+        "type": "notify.webhook",
         "position": {
           "x": 1540.0,
           "y": 280.0
         },
         "data": {
-          "label": "Уведомление",
+          "label": "HTTP webhook",
           "params": {
-            "channel": "webhook",
             "url": "local://inbox",
-            "attach_report": true
+            "method": "POST",
+            "attach_report": true,
+            "dry_run": false
           }
         }
       }

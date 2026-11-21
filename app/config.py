@@ -94,6 +94,11 @@ class Settings:
     git_timeout: int = 120
     git_token: str = ""
     git_username: str = "x-access-token"
+    library_repo: str = ""
+    library_branch: str = "main"
+    library_path: str = "presets"
+    library_token: str = ""
+    library_api_url: str = "https://api.github.com"
 
 
     enable_scheduler: bool = False
@@ -193,6 +198,13 @@ class Settings:
                 "hosts": list(self.allowed_git_hosts),
                 "token_configured": bool(self.git_token),
             },
+            "library": {
+                "configured": bool(self.library_repo),
+                "publish_enabled": bool(self.library_repo and (self.library_token or self.git_token)),
+                "repo": self.library_repo,
+                "branch": self.library_branch,
+                "path": self.library_path,
+            },
             "telegram": {
                 "configured": bool(self.telegram_bot_token),
                 "chat_id_configured": bool(self.telegram_chat_id),
@@ -258,6 +270,11 @@ def load_settings(overrides: dict | None = None) -> Settings:
         git_timeout=_int("LDWARDEN_GIT_TIMEOUT", 120),
         git_token=_str("LDWARDEN_GIT_TOKEN", ""),
         git_username=_str("LDWARDEN_GIT_USERNAME", "x-access-token"),
+        library_repo=_str("LDWARDEN_LIBRARY_REPO", ""),
+        library_branch=_str("LDWARDEN_LIBRARY_BRANCH", "main"),
+        library_path=_str("LDWARDEN_LIBRARY_PATH", "presets"),
+        library_token=_str("LDWARDEN_LIBRARY_TOKEN", ""),
+        library_api_url=_str("LDWARDEN_LIBRARY_API_URL", "https://api.github.com"),
         enable_scheduler=_bool("LDWARDEN_ENABLE_SCHEDULER", False),
         scheduler_interval=_int("LDWARDEN_SCHEDULER_INTERVAL", 30),
         scheduler_timezone=_str("LDWARDEN_SCHEDULER_TZ", "UTC"),

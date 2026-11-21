@@ -84,7 +84,7 @@ class AIService:
                 messages,
                 response_format={"type": "json_object"},
                 temperature=self.settings.llm_temperature,
-                max_tokens=1536,
+                max_tokens=384,
                 cancel_event=cancel_event,
                 deadline=deadline,
             )
@@ -116,7 +116,7 @@ class AIService:
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.0,
-                        max_tokens=1536,
+                        max_tokens=384,
                         cancel_event=cancel_event,
                         deadline=deadline,
                     )
@@ -201,7 +201,7 @@ class AIService:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.1,
-                max_tokens=1536,
+                max_tokens=384,
                 deadline=time.monotonic() + min(45, int(self.settings.llm_timeout or 45)),
             )
         except Exception as exc:

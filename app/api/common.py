@@ -43,6 +43,10 @@ def telegram_service():
     return current_app.extensions["ldwarden_telegram"]
 
 
+def library_service():
+    return current_app.extensions["ldwarden_library"]
+
+
 def secret_box() -> SecretBox:
     return current_app.extensions["ldwarden_secret_box"]
 

@@ -19,10 +19,9 @@ def build_analysis_request(findings: list[dict], meta: dict | None = None) -> st
         "task": "aggregate_security_findings",
         "language": "ru",
         "instructions": {
-            "summary": "2–4 предложения: общая картина и самые опасные проблемы.",
-            "overall_risk": "CRITICAL | HIGH | MEDIUM | LOW на основе переданных severity.",
-            "findings": "По одному элементу на finding_id; объяснение и конкретное исправление.",
-            "next_steps": "3–7 практических шагов в порядке приоритета.",
+            "summary": "2 предложения: общая картина и самые опасные проблемы.",
+            "overall_risk": "CRITICAL | HIGH | MEDIUM | LOW на основе severity.",
+            "findings": "Кратко: finding_id и explanation (1–2 предложения). Remediation можно не повторять.",
             "grounding": "Не добавляй файлы, строки, CVE и GHSA, которых нет во входных данных.",
         },
         "allowed_finding_ids": [item.get("id") for item in findings],
@@ -43,12 +42,8 @@ def build_analysis_request(findings: list[dict], meta: dict | None = None) -> st
                 {
                     "finding_id": "string (из allowed_finding_ids)",
                     "explanation": "string",
-                    "remediation": "string",
-                    "severity_assessment": "string",
-                    "confidence": "number 0..1",
                 }
             ],
-            "next_steps": ["string"],
         },
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)

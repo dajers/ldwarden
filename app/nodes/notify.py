@@ -199,3 +199,57 @@ class NotifyNode(BaseNode):
             f"Находок: {counts['total']} (CRITICAL {counts['CRITICAL']}, HIGH {counts['HIGH']}). "
             + ai_summary
         )
+
+
+def _channel_params(channel: str):
+    return [
+        param
+        for param in NotifyNode.params
+        if param.name != "channel"
+        and (not param.depends_on or param.depends_on.get("channel") == channel)
+    ]
+
+
+class _ChannelNotifyNode(NotifyNode):
+    channel = ""
+
+    def execute(self, ctx, params: dict) -> NodeResult:
+        merged = dict(params)
+        merged["channel"] = self.channel
+        return super().execute(ctx, merged)
+
+
+@register_node
+class EmailNotifyNode(_ChannelNotifyNode):
+    type = "notify.email"
+    title = "Email"
+    description = "Отправляет отчёт на email через SMTP."
+    icon = "✉️"
+    color = "#38bdf8"
+    channel = "smtp"
+    params = _channel_params("smtp")
+    tags = ["notification", "email", "smtp"]
+
+
+@register_node
+class TelegramNotifyNode(_ChannelNotifyNode):
+    type = "notify.telegram"
+    title = "Telegram"
+    description = "Отправляет отчёт в Telegram-чат или канал."
+    icon = "✈️"
+    color = "#38bdf8"
+    channel = "telegram"
+    params = _channel_params("telegram")
+    tags = ["notification", "telegram"]
+
+
+@register_node
+class WebhookNotifyNode(_ChannelNotifyNode):
+    type = "notify.webhook"
+    title = "HTTP webhook"
+    description = "Отправляет отчёт HTTP POST/PUT на webhook; поддерживает local://inbox."
+    icon = "🔗"
+    color = "#38bdf8"
+    channel = "webhook"
+    params = _channel_params("webhook")
+    tags = ["notification", "webhook"]
