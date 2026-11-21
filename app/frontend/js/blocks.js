@@ -22,6 +22,7 @@ export const SEVERITY_COLOR = { CRITICAL: 'var(--crit)', HIGH: 'var(--bad)', MED
 /* ---------- геометрия ---------- */
 
 export const NODE_W = 232;
+
 export const HEADER_H = 38;
 export const BODY_PAD = 10;
 export const ROW_H = 26;
@@ -49,6 +50,13 @@ export function portIndex(type, portId, dir) {
 }
 
 /* ---------- описания узлов ---------- */
+
+const REGEX_FIELDS = {
+  path: 'путь файла',
+  class: 'класс уязвимости',
+  message: 'сообщение правила',
+  category: 'категория',
+};
 
 export const NODE_TYPES = {
   'trigger.manual': {
@@ -96,13 +104,19 @@ export const NODE_TYPES = {
     sub: (p) => p.target,
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
-      { id: 'out', kind: 'exec', label: 'Готово' },
+      { id: 'out', kind: 'exec', label: 'Выход' },
       { id: 'files', kind: 'data', label: 'файлы' },
     ],
     params: [
-      { key: 'target', label: 'Путь или ссылка', type: 'text', def: 'training-project' },
+      {
+        key: 'target',
+        label: 'Путь или ссылка',
+        type: 'text',
+        def: 'training-project',
+        hint: 'Можно указать абсолютный путь к любой папке — просканируются все текстовые файлы внутри.',
+      },
       { key: 'branch', label: 'Ветка', type: 'text', def: 'main' },
-      { key: 'gitToken', label: 'Git-токен', type: 'secret', def: '', hint: 'GitHub: Settings → Developer settings → Personal access tokens → Fine-grained tokens, право Contents: Read. Для GitLab: Access Tokens → read_repository. Шифруется на сервере.' },
+      { key: 'gitToken', label: 'Git-токен', type: 'secret', def: '', hint: 'Для приватного репозитория. Шифруется на сервере; в браузере не сохраняется.' },
       { key: 'gitUsername', label: 'Git-пользователь', type: 'text', def: 'x-access-token', hint: 'GitHub: x-access-token, GitLab: oauth2.' },
     ],
   },
@@ -113,7 +127,7 @@ export const NODE_TYPES = {
     sub: (p) => `SECRET · порог ${p.minSeverity}`,
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
-      { id: 'out', kind: 'exec', label: 'Готово' },
+      { id: 'out', kind: 'exec', label: 'Выход' },
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
     params: [
@@ -128,7 +142,7 @@ export const NODE_TYPES = {
     sub: () => 'SCA · Maven-справочник',
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
-      { id: 'out', kind: 'exec', label: 'Готово' },
+      { id: 'out', kind: 'exec', label: 'Выход' },
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
     params: [{ key: 'db', label: 'Справочник уязвимостей', type: 'text', def: 'vulnerabilities.json' }],
@@ -140,7 +154,7 @@ export const NODE_TYPES = {
     sub: (p) => `SAST · ${p.lang}`,
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
-      { id: 'out', kind: 'exec', label: 'Готово' },
+      { id: 'out', kind: 'exec', label: 'Выход' },
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
     params: [{ key: 'lang', label: 'Язык', type: 'select', options: ['Kotlin', 'Java'], def: 'Kotlin' }],
@@ -190,6 +204,67 @@ export const NODE_TYPES = {
       { key: 'blocking', label: 'Блокировать запуск', type: 'toggle', def: true },
     ],
   },
+  'logic.custom': {
+    cat: 'logic',
+    icon: 'code',
+    title: 'Своё условие',
+    sub: (p) => String(p.expr || '').trim() || 'выражение',
+    inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
+    outputs: [
+      { id: 'true', kind: 'exec', label: 'Да' },
+      { id: 'false', kind: 'exec', label: 'Нет' },
+    ],
+    params: [
+      {
+        key: 'expr',
+        label: 'Условие',
+        type: 'expression',
+        def: 'critical >= 1',
+        hint: 'total, critical, high, medium, low, secret, sca, sast, hasCritical, target · anyPath("regex") · and/or/not',
+      },
+    ],
+  },
+  'logic.regex': {
+    cat: 'logic',
+    icon: 'search',
+    title: 'Регулярка',
+    sub: (p) => `/${p.pattern || ''}/ по ${REGEX_FIELDS[p.field] || p.field}`,
+    inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
+    outputs: [
+      { id: 'true', kind: 'exec', label: 'Совпало' },
+      { id: 'false', kind: 'exec', label: 'Не совпало' },
+    ],
+    params: [
+      { key: 'field', label: 'Где искать', type: 'select', options: ['path', 'class', 'message', 'category'], def: 'path', labels: REGEX_FIELDS },
+      { key: 'pattern', label: 'Регулярное выражение', type: 'text', def: '\\.kt$' },
+      { key: 'negate', label: 'Инвертировать результат', type: 'toggle', def: false, hint: 'Совпадением будет считаться отсутствие match.' },
+    ],
+  },
+  'logic.fork': {
+    cat: 'logic',
+    icon: 'fork',
+    title: 'Разветвитель',
+    sub: () => '1 вход · 3 ветки',
+    inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
+    outputs: [
+      { id: 'a', kind: 'exec', label: 'Ветка 1' },
+      { id: 'b', kind: 'exec', label: 'Ветка 2' },
+      { id: 'c', kind: 'exec', label: 'Ветка 3' },
+    ],
+    params: [],
+  },
+  'logic.join': {
+    cat: 'logic',
+    icon: 'join',
+    title: 'Собиратель',
+    sub: () => 'входы A/B · один выход',
+    inputs: [
+      { id: 'a', kind: 'exec', label: 'Вход A' },
+      { id: 'b', kind: 'exec', label: 'Вход B' },
+    ],
+    outputs: [{ id: 'out', kind: 'exec', label: 'Дальше' }],
+    params: [],
+  },
   'ai.explain': {
     cat: 'action',
     icon: 'sparkles',
@@ -200,7 +275,7 @@ export const NODE_TYPES = {
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
     outputs: [
-      { id: 'out', kind: 'exec', label: 'Готово' },
+      { id: 'out', kind: 'exec', label: 'Выход' },
       { id: 'summary', kind: 'data', label: 'сводка' },
     ],
     params: [
@@ -228,23 +303,18 @@ export const NODE_TYPES = {
   'notify.send': {
     cat: 'action',
     icon: 'send',
-    title: 'Почта',
-    sub: (p) => p.toAddr || 'получатель не задан',
+    title: 'Уведомление',
+    sub: (p) => `${p.channel}${p.onlyCritical ? ' · только критичные' : ''}`,
     inputs: [
       { id: 'in', kind: 'exec', label: 'Вход' },
       { id: 'payload', kind: 'data', label: 'данные' },
     ],
     outputs: [{ id: 'out', kind: 'exec', label: 'Отправлено' }],
     params: [
-      { key: 'host', label: 'SMTP-хост', type: 'text', def: 'smtp.yandex.ru', hint: 'Например smtp.gmail.com, smtp.mail.ru.' },
-      { key: 'port', label: 'Порт', type: 'number', def: 587 },
-      { key: 'username', label: 'Логин', type: 'text', def: '' },
-      { key: 'password', label: 'Пароль приложения', type: 'secret', def: '', hint: 'Шифруется на сервере и маскируется в интерфейсе.' },
-      { key: 'fromAddr', label: 'От кого', type: 'text', def: '' },
-      { key: 'toAddr', label: 'Кому', type: 'text', def: '', hint: 'Можно несколько адресов через запятую.' },
-      { key: 'useTls', label: 'STARTTLS', type: 'toggle', def: true },
-      { key: 'useSsl', label: 'SMTPS (SSL)', type: 'toggle', def: false },
-      { key: 'subject', label: 'Тема', type: 'text', def: 'ldwarden: отчёт о проверке' },
+      { key: 'channel', label: 'Канал', type: 'select', options: ['Telegram', 'HTTP webhook', 'E-mail'], def: 'Telegram' },
+      { key: 'token', label: 'Токен / URL / пароль', type: 'secret', def: '', hint: 'Шифруется на бэкенде и маскируется в интерфейсе.' },
+      { key: 'hmacSecret', label: 'HMAC-секрет webhook', type: 'secret', def: '', hint: 'Подпись X-LDWarden-Signature; шифруется на сервере.' },
+      { key: 'chatId', label: 'Chat ID / адрес', type: 'text', def: '', hint: 'Для Telegram можно оставить пустым — возьмётся из .env или подключения.' },
       { key: 'attachReport', label: 'Приложить отчёт', type: 'toggle', def: true },
       { key: 'dryRun', label: 'Dry-run', type: 'toggle', def: false },
     ],
@@ -258,7 +328,7 @@ export const NODE_TYPES = {
       { id: 'in', kind: 'exec', label: 'Вход' },
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
-    outputs: [{ id: 'out', kind: 'exec', label: 'Готово' }],
+    outputs: [{ id: 'out', kind: 'exec', label: 'Выход' }],
     params: [{ key: 'formats', label: 'Форматы', type: 'select', options: ['JSON + Markdown + SARIF', 'JSON + Markdown', 'Только JSON', 'Только Markdown'], def: 'JSON + Markdown' }],
   },
 };

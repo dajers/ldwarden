@@ -25,6 +25,7 @@ import {
 } from './blocks.js';
 import { api } from './api.js';
 import { plural, summarize, toMarkdown, toOutputJson } from './engine.js';
+import { evaluateExpression } from './expression.js';
 
 /* ------------------------------------------------------------------ */
 /* утилиты                                                             */
@@ -379,13 +380,15 @@ function normalizeGraph(raw) {
       if (n.params && operators[n.params.op]) params.operator = operators[n.params.op];
       params.value = String(params.value);
     }
-    return {
+    const node = {
       id: n.id || newIdent('n'),
       type: n.type,
       x: Number.isFinite(n.x) ? n.x : 120,
       y: Number.isFinite(n.y) ? n.y : 160,
       params,
     };
+    if (typeof n.color === 'string' && n.color) node.color = n.color;
+    return node;
   });
   const ids = new Set(normalized.map((n) => n.id));
   const edges = Array.isArray(raw && raw.edges)
@@ -492,9 +495,14 @@ function portKind(node, portId, dir) {
   return (list.find((p) => p.id === portId) || {}).kind || 'exec';
 }
 
-function wireD(from, to) {
-  const dx = Math.max(48, Math.abs(to.x - from.x) * 0.45);
-  return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`;
+function wireGeometry(from, to) {
+  const dx = to.x - from.x;
+  const out = dx < 0 ? Math.max(70, Math.abs(dx) * 0.5) : Math.max(22, Math.min(160, dx * 0.5));
+  const c1 = { x: from.x + out, y: from.y };
+  const c2 = { x: to.x - out, y: to.y };
+  const d = `M ${from.x} ${from.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${to.x} ${to.y}`;
+  const angle = (Math.atan2(to.y - c2.y, to.x - c2.x) * 180) / Math.PI;
+  return { d, angle };
 }
 
 /* ------------------------------------------------------------------ */
@@ -592,32 +600,79 @@ function deleteCustomPreset(id) {
   toast(`Пресет «${preset.name}» удалён`, 'ok');
 }
 
+function closePresets() {
+  const root = $('#presets');
+  if (!root) return;
+  root.classList.remove('is-open');
+  const trigger = root.querySelector('.preset-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
 function renderPresets() {
   const root = $('#presets');
-  root.replaceChildren(h('span', { class: 'presets__label' }, 'Пресеты:'));
-  for (const preset of [...PRESETS, ...customPresets]) {
-    const button = h('button', { class: 'preset' + (preset.workflow ? ' preset--custom' : ''), type: 'button' }, h('span', { text: preset.name }));
-    button.addEventListener('click', () => applyPreset(preset));
+  const wasOpen = root.classList.contains('is-open');
+
+  const trigger = h(
+    'button',
+    { class: 'preset-trigger', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': wasOpen ? 'true' : 'false' },
+    h('span', { text: 'Пресеты' }),
+    svgIcon('chevron'),
+  );
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const next = !root.classList.contains('is-open');
+    root.classList.toggle('is-open', next);
+    trigger.setAttribute('aria-expanded', String(next));
+  });
+
+  const menu = h('div', { class: 'preset-menu', role: 'menu' });
+
+  const addItem = (preset) => {
+    const item = h(
+      'button',
+      { class: 'preset-item', type: 'button', role: 'menuitem' },
+      h('span', { class: 'preset-item__name', text: preset.name }),
+    );
+    item.addEventListener('click', () => {
+      applyPreset(preset);
+      closePresets();
+    });
     if (preset.workflow) {
-      const remove = h('span', { class: 'preset__remove', role: 'button', tabindex: '0', title: 'Удалить пресет', text: '×' });
-      remove.addEventListener('click', (event) => {
+      const remove = h('span', { class: 'preset-item__remove', role: 'button', tabindex: '0', title: 'Удалить пресет', text: '×' });
+      const removePreset = (event) => {
         event.stopPropagation();
         deleteCustomPreset(preset.id);
-      });
+      };
+      remove.addEventListener('click', removePreset);
       remove.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          event.stopPropagation();
-          deleteCustomPreset(preset.id);
+          removePreset(event);
         }
       });
-      button.append(remove);
+      item.append(remove);
     }
-    root.append(button);
+    menu.append(item);
+  };
+
+  if (PRESETS.length) {
+    menu.append(h('div', { class: 'preset-menu__label', text: 'Встроенные' }));
+    for (const preset of PRESETS) addItem(preset);
   }
-  const add = h('button', { class: 'preset preset--add', type: 'button', text: '+ Свой пресет' });
-  add.addEventListener('click', saveCurrentAsPreset);
-  root.append(add);
+  if (customPresets.length) {
+    menu.append(h('div', { class: 'preset-menu__label', text: 'Мои пресеты' }));
+    for (const preset of customPresets) addItem(preset);
+  }
+
+  const add = h('button', { class: 'preset-item preset-item--add', type: 'button', role: 'menuitem', text: '+ Создать пресет' });
+  add.addEventListener('click', () => {
+    closePresets();
+    saveCurrentAsPreset();
+  });
+  menu.append(add);
+
+  root.replaceChildren(trigger, menu);
+  root.classList.toggle('is-open', wasOpen);
 }
 
 function applyPreset(preset) {
@@ -685,6 +740,7 @@ function renderNode(node) {
     dataset: { id: node.id, type: node.type, cat: def.cat },
     style: `left:${node.x}px;top:${node.y}px;height:${height}px`,
   });
+  if (node.color) el.style.setProperty('--cat', node.color);
 
   const remove = h('button', { class: 'node__remove', type: 'button', 'aria-label': 'Удалить узел' }, svgIcon('x'));
   remove.addEventListener('pointerdown', (event) => event.stopPropagation());
@@ -707,7 +763,7 @@ function renderNode(node) {
     body.append(h('div', { class: 'node__row' }));
   }
   body.append(h('div', { class: 'node__meta', text: nodeSub(node) }));
-  body.append(h('div', { class: 'node__chip' + (chip ? ' is-visible' : ''), text: chip }));
+  body.append(h('div', { class: 'node__chip' + (chip ? ' is-visible' : ''), text: chip, title: chip || '' }));
 
   el.append(head, body);
 
@@ -765,15 +821,25 @@ function renderWires() {
     if (!from || !to) continue;
 
     const kind = portKind(from, edge.from.port, 'out');
-    const d = wireD(pinPosition(from, edge.from.port, 'out'), pinPosition(to, edge.to.port, 'in'));
+    const start = pinPosition(from, edge.from.port, 'out');
+    const end = pinPosition(to, edge.to.port, 'in');
+    const { d, angle } = wireGeometry(start, end);
 
     const g = document.createElementNS(NS, 'g');
     g.setAttribute('class', `wire wire--${kind}${state.selectedEdge === edge.id ? ' is-selected' : ''}`);
     g.dataset.id = edge.id;
 
     const hit = svgPath(d, 'wire__hit');
+    const casing = svgPath(d, 'wire__casing');
     const line = svgPath(d, 'wire__line');
-    if (edge.color) line.style.stroke = edge.color;
+    const arrow = svgPath('M -8 -4.2 L 0 0 L -8 4.2 Z', 'wire__arrow');
+    arrow.setAttribute('transform', `translate(${end.x} ${end.y}) rotate(${angle})`);
+
+    if (edge.color) {
+      line.style.stroke = edge.color;
+      arrow.style.fill = edge.color;
+    }
+
     hit.addEventListener('pointerdown', (event) => {
       if (event.button === 0) event.stopPropagation();
     });
@@ -783,7 +849,7 @@ function renderWires() {
       openEdgeMenu(edge, event.clientX, event.clientY);
     });
 
-    g.append(hit, line);
+    g.append(hit, casing, line, arrow);
     frag.append(g);
   }
 
@@ -794,7 +860,7 @@ function updateNodeElement(id) {
   const el = $(`.node[data-id="${id}"]`);
   if (!el) return;
   const status = state.statuses[id];
-  el.classList.remove('is-running', 'is-done', 'is-skipped', 'is-error');
+  el.classList.remove('is-running', 'is-done', 'is-skipped', 'is-error', 'is-pending');
   if (status) el.classList.add('is-' + status);
 
   const chip = el.querySelector('.node__chip');
@@ -885,6 +951,44 @@ function inspectorHead(kicker, title, iconName) {
   );
 }
 
+async function connectTelegram(node) {
+  try {
+    const session = await api.telegramConnect();
+    const link = document.createElement('a');
+    link.href = session.connect_url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    toast('В Telegram нажмите Start — ждём подключение…', 'info');
+    const started = Date.now();
+    while (Date.now() - started < 90000) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const result = await api.telegramChats(session.state);
+      if (result.items && result.items.length) {
+        const chat = result.items[0];
+        node.params.chatId = String(chat.chat_id);
+        saveWorkflow();
+        renderInspector();
+        try {
+          const saved = await api.saveWorkflow(state.workflow);
+          if (saved && saved.id && result.items.length === 1) {
+            await api.telegramLink(session.state, chat.chat_id, saved.id);
+          }
+        } catch {
+          /* привязка не критична, chat_id уже в ноде */
+        }
+        toast(`Telegram подключён: ${chat.title || chat.chat_id}`, 'ok');
+        return;
+      }
+    }
+    toast('Не дождались Start в Telegram', 'warn');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось подключить Telegram', 'warn');
+  }
+}
+
 function renderInspector() {
   const root = $('#inspector');
   const visible = Boolean(state.selectedNode);
@@ -901,12 +1005,23 @@ function renderInspector() {
   }
 
   const def = NODE_TYPES[node.type];
-  root.style.setProperty('--cat', CATEGORIES[def.cat].color);
+  root.style.setProperty('--cat', node.color || CATEGORIES[def.cat].color);
 
   root.append(inspectorHead(CATEGORIES[def.cat].label, def.title, def.icon));
 
   const body = h('div', { class: 'inspector__body' });
   for (const param of def.params) body.append(renderField(node, param));
+  if (node.type === 'logic.custom') body.append(h('p', { class: 'field__hint expr-hint', id: 'exprHint' }));
+  body.append(renderNodeColor(node));
+  if (api.isRemote && node.type === 'notify.send' && node.params.channel === 'Telegram') {
+    const connect = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('send'), h('span', { text: 'Подключить Telegram' }));
+    connect.addEventListener('click', () => connectTelegram(node));
+    body.append(
+      h('div', { class: 'field' },
+        connect,
+        h('p', { class: 'field__hint', text: 'Откроется бот. Нажмите Start — Chat ID подставится автоматически.' })),
+    );
+  }
   const output = state.outputs[node.id];
   body.append(
     h('div', { class: 'field' },
@@ -915,6 +1030,7 @@ function renderInspector() {
     ),
   );
   root.append(body);
+  if (node.type === 'logic.custom') updateExprHint(node);
 
   const duplicate = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('copy'), h('span', { text: 'Дублировать' }));
   duplicate.addEventListener('click', () => {
@@ -948,6 +1064,18 @@ function renderField(node, param) {
 
   wrap.append(h('label', { class: 'field__label', text: param.label }));
 
+  if (param.type === 'expression') {
+    const area = h('textarea', { class: 'input input--area', rows: '2', spellcheck: 'false' });
+    area.value = value ?? '';
+    area.addEventListener('input', () => {
+      setParam(node, param.key, area.value);
+      updateExprHint(node);
+    });
+    wrap.append(area);
+    if (param.hint) wrap.append(h('p', { class: 'field__hint', text: param.hint }));
+    return wrap;
+  }
+
   if (param.type === 'select') {
     const select = h('select', { class: 'select' });
     for (const option of param.options) {
@@ -972,6 +1100,72 @@ function renderField(node, param) {
 
   if (param.hint) wrap.append(h('p', { class: 'field__hint', text: param.hint }));
   return wrap;
+}
+
+function renderNodeColor(node) {
+  const def = NODE_TYPES[node.type];
+  const wrap = h('div', { class: 'field' });
+  wrap.append(h('span', { class: 'field__label', text: 'Цвет узла' }));
+
+  const row = h('div', { class: 'color-row' });
+  const options = [
+    { value: null, title: 'Как в теме', color: CATEGORIES[def.cat].color },
+    { value: '#e05252', title: 'Красный' },
+    { value: '#e0913c', title: 'Оранжевый' },
+    { value: '#4fa870', title: 'Зелёный' },
+    { value: '#3b82f6', title: 'Синий' },
+    { value: '#a855f7', title: 'Фиолетовый' },
+  ];
+
+  for (const option of options) {
+    const swatch = h('button', {
+      class: 'color-swatch' + (option.value === null ? ' color-swatch--theme' : ''),
+      type: 'button',
+      title: option.title,
+      'aria-label': option.title,
+    });
+    swatch.style.setProperty('--sw', option.color || option.value);
+    swatch.classList.toggle('is-active', (node.color || null) === option.value);
+    swatch.addEventListener('click', () => setNodeColor(node, option.value));
+    row.append(swatch);
+  }
+
+  const custom = h('label', { class: 'color-swatch color-swatch--custom', title: 'Свой цвет' });
+  const input = h('input', { type: 'color', value: node.color || '#d9738f' });
+  input.addEventListener('change', () => setNodeColor(node, input.value));
+  custom.append(input);
+  row.append(custom);
+
+  wrap.append(row);
+  return wrap;
+}
+
+function setNodeColor(node, color) {
+  if (color) node.color = color;
+  else delete node.color;
+  saveWorkflow();
+
+  const el = $(`.node[data-id="${node.id}"]`);
+  if (el) {
+    if (node.color) el.style.setProperty('--cat', node.color);
+    else el.style.removeProperty('--cat');
+  }
+  renderInspector();
+}
+
+function updateExprHint(node) {
+  const hint = $('#exprHint');
+  if (!hint) return;
+  const findings = state.run ? state.run.findings : [];
+  const result = evaluateExpression(node.params.expr, findings, targetName());
+  hint.classList.toggle('is-error', !result.ok);
+  if (!result.ok) {
+    hint.textContent = `Ошибка: ${result.error}`;
+  } else if (state.run) {
+    hint.textContent = `На последнем прогоне: ${result.value ? 'истина' : 'ложь'}`;
+  } else {
+    hint.textContent = 'Синтаксис в порядке — условие проверится при запуске';
+  }
 }
 
 function setParam(node, key, value) {
@@ -1103,7 +1297,7 @@ function fitView() {
   const maxY = Math.max(...nodes.map((n) => n.y + nodeHeight(n.type)));
   const w = Math.max(1, maxX - minX);
   const hgt = Math.max(1, maxY - minY);
-  const z = clamp(Math.min((rect.width - pad * 2) / w, (rect.height - pad * 2) / hgt, 1.15), 0.66, 1.2);
+  const z = clamp(Math.min((rect.width - pad * 2) / w, (rect.height - pad * 2) / hgt, 1.15), 0.4, 1.2);
   state.view.z = z;
   state.view.x = (rect.width - w * z) / 2 - minX * z;
   state.view.y = (rect.height - hgt * z) / 2 - minY * z;
@@ -1217,7 +1411,7 @@ function startLink(event, node, pin, dir) {
     cursor: origin,
   };
 
-  $('#tempWire').setAttribute('d', wireD(origin, origin));
+  $('#tempWire').setAttribute('d', wireGeometry(origin, origin).d);
   $('#tempWire').classList.add('is-visible');
 
   for (const el of $$('.pin')) {
@@ -1299,7 +1493,7 @@ function onPointerMove(event) {
   if (interaction.kind === 'link') {
     const world = screenToWorld(event.clientX, event.clientY);
     interaction.cursor = world;
-    $('#tempWire').setAttribute('d', wireD(interaction.origin, world));
+    $('#tempWire').setAttribute('d', wireGeometry(interaction.origin, world).d);
     return;
   }
 
@@ -1400,8 +1594,17 @@ function validate() {
   if (!scans.length) return 'Добавьте хотя бы одну проверку';
 
   const outgoing = new Map(nodes.map((n) => [n.id, []]));
+  const execPort = (nodeId, portId, dir) => {
+    const node = nodes.find((item) => item.id === nodeId);
+    if (!node) return false;
+    const def = NODE_TYPES[node.type];
+    const list = dir === 'out' ? def.outputs : def.inputs;
+    const port = list.find((item) => item.id === portId);
+    return Boolean(port) && port.kind === 'exec';
+  };
   for (const edge of state.workflow.edges) {
-    if (!['out', 'true', 'false', 'pass', 'fail'].includes(edge.from.port) || edge.to.port !== 'in') continue;
+    if (!execPort(edge.from.node, edge.from.port, 'out')) continue;
+    if (!execPort(edge.to.node, edge.to.port, 'in')) continue;
     (outgoing.get(edge.from.node) || []).push(edge.to.node);
   }
   const reachable = (starts) => {
@@ -1482,6 +1685,11 @@ function onEvent(event) {
       break;
     case 'node.started':
       state.statuses[event.nodeId] = 'running';
+      updateNodeElement(event.nodeId);
+      break;
+    case 'node.pending':
+      state.statuses[event.nodeId] = 'pending';
+      state.chips[event.nodeId] = event.chip || 'ждём';
       updateNodeElement(event.nodeId);
       break;
     case 'node.done':
@@ -1768,6 +1976,12 @@ function exportMarkdown() {
 /* ------------------------------------------------------------------ */
 
 function bindEvents() {
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#presets')) closePresets();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closePresets();
+  });
   $('#runBtn').addEventListener('click', startRun);
   $('#historyBtn').addEventListener('click', openModal);
   $('#closeDrawer').addEventListener('click', closeDrawer);

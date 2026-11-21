@@ -6,8 +6,13 @@
 
 import { FINDINGS } from './fixtures.js';
 import { SEVERITY_RANK, SEVERITY_LABEL, NODE_TYPES } from './blocks.js';
+import { evaluateExpression } from './expression.js';
 
 const DELAY = {
+  'logic.fork': 220,
+  'logic.join': 220,
+  'logic.regex': 260,
+  'logic.custom': 240,
   'scan.secret': 780,
   'scan.sca': 860,
   'scan.sast': 940,
@@ -39,8 +44,9 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
   const edges = workflow.edges || [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
-  const ctx = { findings: [], ai: null, notified: null, report: null, outputs: {} };
+  const ctx = { findings: [], ai: null, notified: null, report: null, outputs: {}, target: '' };
   const visited = new Set();
+  const joinArrivals = new Map();
 
   onEvent({ type: 'run.started', total: nodes.length, at: startedAt });
 
@@ -53,23 +59,40 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
     return list.find((p) => p.id === portId)?.kind;
   };
 
-  async function walk(node) {
-    if (!node || visited.has(node.id)) return;
+  async function walk(node, viaEdge = null) {
+    if (!node) return;
+
+    // «Собиратель» ждёт все подключённые входы
+    if (node.type === 'logic.join') {
+      const incoming = edges.filter((edge) => edge.to.node === node.id);
+      const arrived = joinArrivals.get(node.id) || new Set();
+      if (viaEdge) arrived.add(viaEdge.id);
+      joinArrivals.set(node.id, arrived);
+      if (arrived.size < incoming.length) {
+        onEvent({ type: 'node.pending', nodeId: node.id, chip: `ждём ${incoming.length - arrived.size}` });
+        return;
+      }
+    }
+
+    if (visited.has(node.id)) return;
     visited.add(node.id);
 
     onEvent({ type: 'node.started', nodeId: node.id });
     await sleep(DELAY[node.type] ?? DELAY.default);
     check(token);
 
-    const { port, chip, output } = await execute(node);
+    const { port, ports, chip, output, status } = await execute(node);
 
-    onEvent({ type: 'node.done', nodeId: node.id, status: 'done', chip, output });
+    onEvent({ type: 'node.done', nodeId: node.id, status: status || 'done', chip, output });
 
-    for (const edge of execFrom(node.id, port)) {
-      onEvent({ type: 'edge.active', edgeId: edge.id });
-      await sleep(110);
-      check(token);
-      await walk(byId.get(edge.to.node));
+    const outPorts = Array.isArray(ports) ? ports : port ? [port] : [];
+    for (const portId of outPorts) {
+      for (const edge of execFrom(node.id, portId)) {
+        onEvent({ type: 'edge.active', edgeId: edge.id });
+        await sleep(110);
+        check(token);
+        await walk(byId.get(edge.to.node), edge);
+      }
     }
   }
 
@@ -84,6 +107,7 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
       case 'source.repo': {
         const chip = `${String(node.params.target).split('/').pop() || 'проект'} · 132 файла`;
         const output = { target: node.params.target, files: 132 };
+        ctx.target = node.params.target;
         ctx.outputs[node.id] = output;
         return { port: 'out', chip, output };
       }
@@ -109,6 +133,39 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
         const hit = evaluate(node.params, ctx.findings);
         return { port: hit ? 'true' : 'false', chip: hit ? 'да' : 'нет', output: { decision: hit } };
       }
+
+      case 'logic.custom': {
+        const result = evaluateExpression(node.params.expr, ctx.findings, ctx.target || '');
+        if (!result.ok) {
+          return { ports: [], chip: 'ошибка условия', status: 'error', output: { error: result.error } };
+        }
+        return { ports: [result.value ? 'true' : 'false'], chip: result.value ? 'да' : 'нет', output: { value: result.value } };
+      }
+
+      case 'logic.regex': {
+        const fields = {
+          path: (f) => f.path || '',
+          class: (f) => f.class || '',
+          message: (f) => f.message || f.description || '',
+          category: (f) => f.category || '',
+        };
+        const getter = fields[node.params.field] || fields.path;
+        let expression;
+        try {
+          expression = new RegExp(node.params.pattern || '');
+        } catch (error) {
+          return { ports: [], chip: 'ошибка regex', status: 'error', output: { error: error.message } };
+        }
+        const matched = ctx.findings.some((finding) => expression.test(getter(finding)));
+        const value = node.params.negate ? !matched : matched;
+        return { ports: [value ? 'true' : 'false'], chip: value ? 'совпало' : 'нет', output: { matched, value } };
+      }
+
+      case 'logic.fork':
+        return { ports: ['a', 'b', 'c'], chip: '3 ветки', output: { branches: ['a', 'b', 'c'] } };
+
+      case 'logic.join':
+        return { ports: ['out'], chip: 'объединено', output: { merged: true } };
 
       case 'ai.explain': {
         const linked = dataInto(node.id, 'findings');

@@ -8,6 +8,10 @@ export const CONFIG = {
 };
 
 const TYPE_TO_BACKEND = {
+  'logic.custom': 'logic.custom',
+  'logic.regex': 'logic.regex',
+  'logic.fork': 'logic.fork',
+  'logic.join': 'logic.join',
   'source.repo': 'source.target',
   'scan.secret': 'scan.secrets',
   'ai.explain': 'ai.analyze',
@@ -18,6 +22,17 @@ const TYPE_TO_BACKEND = {
 const TYPE_FROM_BACKEND = Object.fromEntries(
   Object.entries(TYPE_TO_BACKEND).map(([front, back]) => [back, front]),
 );
+
+const CHANNEL_TO_BACKEND = {
+  Telegram: 'telegram',
+  'HTTP webhook': 'webhook',
+  'E-mail': 'smtp',
+};
+const CHANNEL_FROM_BACKEND = {
+  telegram: 'Telegram',
+  webhook: 'HTTP webhook',
+  smtp: 'E-mail',
+};
 
 const FIELD_TO_BACKEND = {
   total: 'findings.total',
@@ -31,6 +46,16 @@ const FIELD_FROM_BACKEND = {
 };
 
 const OPERATOR_TO_BACKEND = { '>=': 'gte', '==': 'eq', '<=': 'lte', '>': 'gt' };
+
+const REGEX_FIELD_TO_BACKEND = {
+  path: 'findings.path',
+  class: 'findings.class',
+  message: 'findings.message',
+  category: 'findings.category',
+};
+const REGEX_FIELD_FROM_BACKEND = Object.fromEntries(
+  Object.entries(REGEX_FIELD_TO_BACKEND).map(([front, back]) => [back, front]),
+);
 const OPERATOR_FROM_BACKEND = { gte: '>=', eq: '==', lte: '<=', gt: '>' };
 
 const CRON_TO_LABEL = {
@@ -161,6 +186,18 @@ function mapParamsToBackend(node) {
         value: String(params.value ?? '1'),
         case_sensitive: Boolean(params.caseSensitive),
       };
+    case 'logic.custom':
+      return { expr: params.expr || 'critical >= 1' };
+    case 'logic.regex':
+      return {
+        field: REGEX_FIELD_TO_BACKEND[params.field] || 'findings.path',
+        pattern: params.pattern || '',
+        case_sensitive: false,
+        negate: Boolean(params.negate),
+      };
+    case 'logic.fork':
+    case 'logic.join':
+      return {};
     case 'control.gate':
       return {
         threshold: params.threshold || 'HIGH',
@@ -174,21 +211,25 @@ function mapParamsToBackend(node) {
         threads: Number(params.threads) || 4,
         timeout: Number(params.timeout) || 45,
       };
-    case 'notify.send':
-      return {
-        channel: 'smtp',
-        host: params.host || '',
-        port: Number(params.port) || 587,
-        username: params.username || '',
-        password: params.password || '',
-        from_addr: params.fromAddr || '',
-        to_addr: params.toAddr || '',
-        use_tls: params.useTls !== false,
-        use_ssl: Boolean(params.useSsl),
-        subject: params.subject || 'ldwarden: отчёт о проверке',
+    case 'notify.send': {
+      const channel = CHANNEL_TO_BACKEND[params.channel] || 'telegram';
+      const base = {
+        channel,
         attach_report: params.attachReport !== false,
         dry_run: Boolean(params.dryRun),
       };
+      if (channel === 'telegram') {
+        return { ...base, bot_token: params.token || '', chat_id: params.chatId || '' };
+      }
+      if (channel === 'webhook') {
+        return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
+      }
+      return {
+        ...base,
+        password: params.token || '',
+        to_addr: params.chatId || '',
+      };
+    }
     case 'report.build':
       return { formats: FORMATS_FROM_LABEL[params.formats] || ['md', 'json'] };
     default:
@@ -223,6 +264,17 @@ function mapParamsFromBackend(node) {
         value: String(params.value ?? '1'),
         caseSensitive: Boolean(params.case_sensitive),
       };
+    case 'logic.custom':
+      return { expr: params.expr || '' };
+    case 'logic.regex':
+      return {
+        field: REGEX_FIELD_FROM_BACKEND[params.field] || 'path',
+        pattern: params.pattern || '',
+        negate: Boolean(params.negate),
+      };
+    case 'logic.fork':
+    case 'logic.join':
+      return {};
     case 'control.severity_gate':
       return { threshold: params.threshold || 'HIGH', blocking: params.blocking !== false };
     case 'ai.analyze':
@@ -237,20 +289,21 @@ function mapParamsFromBackend(node) {
         threads: params.threads || 4,
         timeout: params.timeout || 45,
       };
-    case 'notify.send':
+    case 'notify.send': {
+      const channel = CHANNEL_FROM_BACKEND[params.channel] || 'Telegram';
+      let token = '';
+      if (params.channel === 'webhook') token = params.url || '';
+      else if (params.channel === 'smtp') token = params.password || '';
+      else token = params.bot_token || '';
       return {
-        host: params.host || '',
-        port: params.port || 587,
-        username: params.username || '',
-        password: params.password || '',
-        fromAddr: params.from_addr || params.username || '',
-        toAddr: params.to_addr || '',
-        useTls: params.use_tls !== false,
-        useSsl: Boolean(params.use_ssl),
-        subject: params.subject || 'ldwarden: отчёт о проверке',
+        channel,
+        token,
+        chatId: params.chat_id || params.to_addr || '',
         attachReport: params.attach_report !== false,
         dryRun: Boolean(params.dry_run),
+        hmacSecret: params.secret || '',
       };
+    }
     case 'report.build': {
       const formats = Array.isArray(params.formats) ? params.formats.slice().sort().join(',') : 'json,md';
       return { formats: FORMATS_TO_LABEL[formats] || 'JSON + Markdown' };
@@ -261,7 +314,7 @@ function mapParamsFromBackend(node) {
 }
 
 function execPort(port) {
-  return ['out', 'true', 'false', 'pass', 'fail'].includes(port);
+  return ['out', 'true', 'false', 'pass', 'fail', 'a', 'b', 'c'].includes(port);
 }
 
 export function toBackendGraph(workflow) {
@@ -274,6 +327,7 @@ export function toBackendGraph(workflow) {
       data: {
         label: nodeTitle(node),
         params: mapParamsToBackend(node),
+        ...(node.color ? { color: node.color } : {}),
       },
     }));
   const ids = new Set(nodes.map((node) => node.id));
@@ -282,8 +336,7 @@ export function toBackendGraph(workflow) {
       (edge) =>
         ids.has(edge.from.node) &&
         ids.has(edge.to.node) &&
-        execPort(edge.from.port) &&
-        edge.to.port === 'in',
+        execPort(edge.from.port),
     )
     .map((edge) => ({
       id: edge.id,
@@ -302,28 +355,41 @@ export function fromBackendWorkflow(row) {
     const frontType = TYPE_FROM_BACKEND[node.type] || node.type;
     if (
       !frontType.startsWith('trigger.') &&
-      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'notify.send', 'report.build'].includes(frontType)
+      !['source.repo', 'scan.secret', 'scan.sca', 'scan.sast', 'ai.explain', 'logic.branch', 'control.gate', 'logic.custom', 'logic.regex', 'logic.fork', 'logic.join', 'notify.send', 'report.build'].includes(frontType)
     ) {
       continue;
     }
     const params = node.data && node.data.params ? node.data.params : {};
     const mapped = mapParamsFromBackend({ type: node.type, params });
-    nodes.push({
+    const entry = {
       id: node.id,
       type: frontType,
       x: Number(node.position && node.position.x) || 0,
       y: Number(node.position && node.position.y) || 0,
       params: mapped,
-    });
+    };
+    if (node.data && typeof node.data.color === 'string' && node.data.color) entry.color = node.data.color;
+    nodes.push(entry);
   }
   const ids = new Set(nodes.map((node) => node.id));
+  const joinCounters = new Map();
   const edges = (graph.edges || [])
     .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
-    .map((edge) => ({
-      id: edge.id,
-      from: { node: edge.source, port: edge.sourceHandle || 'out' },
-      to: { node: edge.target, port: edge.targetHandle || 'in' },
-    }));
+    .map((edge) => {
+      const target = nodes.find((node) => node.id === edge.target);
+      let port = edge.targetHandle || 'in';
+      // у «Собирателя» два входных пина: раскладываем связи по ним
+      if (target && target.type === 'logic.join') {
+        const count = joinCounters.get(target.id) || 0;
+        port = count === 0 ? 'a' : 'b';
+        joinCounters.set(target.id, count + 1);
+      }
+      return {
+        id: edge.id,
+        from: { node: edge.source, port: edge.sourceHandle || 'out' },
+        to: { node: edge.target, port },
+      };
+    });
   return {
     id: row.id || 'wf-' + Date.now().toString(36),
     backendId: row.id || null,
@@ -671,6 +737,25 @@ async function run(workflow, handlers = {}, token = { cancelled: false }) {
   }
 }
 
+async function telegramConnect() {
+  return request('/telegram/connect', { method: 'POST' });
+}
+
+async function telegramChats(state) {
+  return request(`/telegram/chats?state=${encodeURIComponent(state)}`);
+}
+
+async function telegramLink(state, chatId, workflowId) {
+  return request('/telegram/link', {
+    method: 'POST',
+    body: {
+      state,
+      chat_id: String(chatId),
+      workflow_id: workflowId || undefined,
+    },
+  });
+}
+
 async function health() {
   if (!remoteAvailable) return null;
   try {
@@ -686,6 +771,9 @@ export const api = {
   loadWorkflow,
   saveWorkflow,
   health,
+  telegramConnect,
+  telegramChats,
+  telegramLink,
   toBackendGraph,
   fromBackendWorkflow,
   get isRemote() {

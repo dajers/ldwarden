@@ -12,7 +12,15 @@ from app.core.models import (
     severity_rank,
 )
 from app.core.registry import register_node
-from app.nodes.base import BaseNode
+from app.nodes.base import BaseNode, NodeError
+from app.nodes.expression import ExpressionError, evaluate as evaluate_expression
+
+FINDING_FIELDS = {
+    "path": lambda finding: finding.path,
+    "class": lambda finding: finding.class_name,
+    "message": lambda finding: finding.message or finding.description,
+    "category": lambda finding: finding.category,
+}
 
 OPERATORS = [
     {"value": "eq", "label": "равно"},
@@ -230,16 +238,46 @@ class RegexNode(BaseNode):
         ParamSpec("field", "string", "Поле", "Путь к значению", default="ai.summary", required=True),
         ParamSpec("pattern", "string", "Регулярное выражение", "Python regex", default="", required=True, placeholder="CRITICAL|HIGH"),
         ParamSpec("case_sensitive", "boolean", "Учитывать регистр", "", default=False),
+        ParamSpec("negate", "boolean", "Инвертировать результат", "Совпадением считается отсутствие match", default=False),
     ]
     tags = ["logic", "regex"]
 
     def execute(self, ctx, params: dict) -> NodeResult:
         context = logic_context(ctx)
-        actual = resolve_field(context, params.get("field", ""))
-        result = evaluate(actual, "regex", params.get("pattern"), bool(params.get("case_sensitive")))
+        field = str(params.get("field") or "")
+        pattern = str(params.get("pattern") or "")
+        case_sensitive = bool(params.get("case_sensitive"))
+        negate = bool(params.get("negate"))
+
+        # Поля находок: проверяем, что шаблон найден хотя бы в одной находке.
+        if field.startswith("findings.") and field.split(".", 1)[1] in FINDING_FIELDS:
+            attribute = field.split(".", 1)[1]
+            try:
+                expression = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+            except re.error as exc:
+                raise NodeError(f"Некорректное регулярное выражение: {exc}") from exc
+            getter = FINDING_FIELDS[attribute]
+            matched = any(expression.search(str(getter(finding) or "")) for finding in ctx.findings)
+            result = (not matched) if negate else matched
+            ctx.emit(
+                "logic.evaluated",
+                f"regex {pattern} по {field} → {result}",
+                node_id=ctx.node_id,
+                payload={"result": result, "matched": matched, "field": field},
+            )
+            return NodeResult(
+                outputs={"result": result, "matched": matched, "count": len(ctx.findings)},
+                active_handles=["true" if result else "false"],
+                message=f"Regex: {'совпало' if result else 'не совпало'}",
+            )
+
+        actual = resolve_field(context, field)
+        result = evaluate(actual, "regex", pattern, case_sensitive)
+        if negate:
+            result = not result
         ctx.emit(
             "logic.evaluated",
-            f"regex {params.get('pattern')} по {params.get('field')} → {result}",
+            f"regex {pattern} по {field} → {result}",
             node_id=ctx.node_id,
             payload={"result": result},
         )
@@ -325,4 +363,109 @@ class SeverityGateNode(BaseNode):
             active_handles=[handle],
             message=f"Порог {threshold} {'пройден' if passed else 'превышен'}",
             preview={"passed": passed, "max_severity": maximum, "threshold": threshold},
+        )
+
+
+@register_node
+class ForkNode(BaseNode):
+    type = "logic.fork"
+    category = "logic"
+    title = "Разветвитель"
+    description = "Запускает несколько веток: все выходные пины становятся активными."
+    icon = "🔱"
+    color = "#0ea5e9"
+    inputs = [HandleSpec("in", "Вход", position="left", kind="target")]
+    outputs = [
+        HandleSpec("a", "Ветка 1"),
+        HandleSpec("b", "Ветка 2"),
+        HandleSpec("c", "Ветка 3"),
+    ]
+    params = []
+    tags = ["logic", "fork", "parallel"]
+
+    def execute(self, ctx, params: dict) -> NodeResult:
+        ctx.emit(
+            "logic.forked",
+            "Поток разветвлён на 3 ветки",
+            node_id=ctx.node_id,
+            payload={"branches": ["a", "b", "c"]},
+        )
+        return NodeResult(
+            outputs={"branches": ["a", "b", "c"]},
+            active_handles=["a", "b", "c"],
+            message="Разветвление на 3 ветки",
+        )
+
+
+@register_node
+class JoinNode(BaseNode):
+    type = "logic.join"
+    category = "logic"
+    title = "Собиратель"
+    description = "Ждёт все подключённые входы и продолжает поток один раз."
+    icon = "🧩"
+    color = "#0284c7"
+    inputs = [HandleSpec("in", "Входы A/B", position="left", kind="target")]
+    outputs = [HandleSpec("out", "Дальше")]
+    params = []
+    tags = ["logic", "join", "merge"]
+
+    def execute(self, ctx, params: dict) -> NodeResult:
+        ctx.emit(
+            "logic.joined",
+            "Ветки объединены",
+            node_id=ctx.node_id,
+            payload={"findings": len(ctx.findings)},
+        )
+        return NodeResult(
+            outputs={"merged": True, "findings": len(ctx.findings)},
+            active_handles=["out"],
+            message="Ветки объединены",
+        )
+
+
+@register_node
+class CustomConditionNode(BaseNode):
+    type = "logic.custom"
+    category = "logic"
+    title = "Своё условие"
+    description = (
+        "Пользовательское выражение: total, critical, high, secret, hasCritical, "
+        "anyPath('regex'), matches(target, '...'), and/or/not."
+    )
+    icon = "🧮"
+    color = "#8b5cf6"
+    outputs = [HandleSpec("true", "Да"), HandleSpec("false", "Нет")]
+    params = [
+        ParamSpec(
+            "expr",
+            "string",
+            "Условие",
+            "Выражение на переменных и функциях",
+            default="critical >= 1",
+            required=True,
+            placeholder="critical >= 1 and not anyPath('/test/')",
+        ),
+    ]
+    tags = ["logic", "condition", "expression"]
+
+    def execute(self, ctx, params: dict) -> NodeResult:
+        source = str(params.get("expr") or "")
+        target = ctx.source.label if ctx.source else ""
+        try:
+            result = evaluate_expression(source, ctx.findings, target)
+        except ExpressionError as exc:
+            raise NodeError(f"Ошибка условия: {exc}") from exc
+        handle = "true" if result else "false"
+        ctx.emit(
+            "logic.evaluated",
+            f"{source} → {result}",
+            node_id=ctx.node_id,
+            payload={"expression": source, "result": result},
+        )
+        return NodeResult(
+            outputs={"result": result, "expression": source, "findings": len(ctx.findings)},
+            active_handles=[handle],
+            message=f"Условие: {'да' if result else 'нет'}",
+            preview={"expression": source, "result": result},
         )

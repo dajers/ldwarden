@@ -130,19 +130,18 @@ class Settings:
             path.mkdir(parents=True, exist_ok=True)
 
     def resolve_allowed_path(self, value: str | Path) -> Path:
-        """Resolve a user supplied path and ensure it stays inside allowed roots."""
+        """Resolve a user supplied path.
+
+        Сканировать можно любую существующую папку или файл — ограничения
+        allowed_roots больше не применяются (локальный инструмент).
+        """
         path = Path(value).expanduser()
         if not path.is_absolute():
             path = self.base_dir / path
         resolved = path.resolve()
-        for root in self.allowed_roots:
-            root = root.resolve()
-            if resolved == root or root in resolved.parents:
-                return resolved
-        raise PermissionError(
-            "Сканирование разрешено только внутри разрешённых каталогов: "
-            + ", ".join(str(p) for p in self.allowed_roots)
-        )
+        if not resolved.exists():
+            raise FileNotFoundError(f"Источник не найден: {resolved}")
+        return resolved
 
     def is_allowed_path(self, value: str | Path) -> bool:
         try:
