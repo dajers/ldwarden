@@ -50,7 +50,7 @@ def _paths(name: str) -> list[Path]:
     for chunk in raw.replace(",", os.pathsep).split(os.pathsep):
         item = chunk.strip()
         if item:
-            # Относительные пути разрешаются от BASE_DIR в Settings.__post_init__.
+
             result.append(Path(item).expanduser())
     return result
 
@@ -68,6 +68,7 @@ class Settings:
     default_target: Path = default_training_target()
     allowed_roots: list[Path] = field(default_factory=list)
     allow_arbitrary_paths: bool = False
+    allow_absolute_paths: bool = True
     vulnerability_db_path: Path = BASE_DIR / "app" / "vulnerability-database" / "vulnerabilities.json"
     workflow_templates_dir: Path = BASE_DIR / "app" / "workflow_templates"
     frontend_dir: Path = BASE_DIR / "app" / "frontend"
@@ -156,7 +157,7 @@ class Settings:
         path = (self.base_dir / path).resolve() if not path.is_absolute() else path.resolve()
         if path.exists():
             return path
-        # путь могли указать с лишним префиксом каталога — ищем файл по имени в llms/
+
         if self.llm_models_dir.exists():
             matches = sorted(self.llm_models_dir.rglob(path.name))
             if matches:
@@ -170,10 +171,10 @@ class Settings:
     def resolve_allowed_path(self, value: str | Path) -> Path:
         """Resolve a user supplied path against the configured allow-list.
 
-        По умолчанию разрешены только учебные материалы и загруженные
-        источники. Для доверенного локального проекта добавьте его в
-        LDWARDEN_ALLOWED_ROOTS или явно включите
-        LDWARDEN_ALLOW_ARBITRARY_PATHS=true.
+        Абсолютный путь разрешён по умолчанию (удобно для локального проекта).
+        Относительные пути ограничены LDWARDEN_ALLOWED_ROOTS. Для публичного
+        контура отключите абсолютные пути:
+        LDWARDEN_ALLOW_ABSOLUTE_PATHS=false.
         """
         path = Path(value).expanduser()
         if not path.is_absolute():
@@ -181,6 +182,11 @@ class Settings:
         resolved = path.resolve()
         if not resolved.exists():
             raise FileNotFoundError(f"Источник не найден: {resolved}")
+
+
+
+        if self.allow_absolute_paths and Path(value).expanduser().is_absolute():
+            return resolved
         if self.allow_arbitrary_paths:
             return resolved
         allowed = any(
@@ -225,6 +231,8 @@ class Settings:
         return {
             "default_target": str(self.default_target),
             "allowed_roots": [str(p) for p in self.allowed_roots],
+            "allow_absolute_paths": self.allow_absolute_paths,
+            "allow_arbitrary_paths": self.allow_arbitrary_paths,
             "llm": {
                 "provider": self.effective_llm_provider,
                 "models_dir": str(self.llm_models_dir),
@@ -321,6 +329,7 @@ def load_settings(overrides: dict | None = None) -> Settings:
         allow_local_webhooks=_bool("LDWARDEN_ALLOW_LOCAL_WEBHOOKS", True),
         allowed_git_hosts=[h.strip().lower() for h in _str("LDWARDEN_ALLOWED_GIT_HOSTS", "").split(",") if h.strip()],
         allow_arbitrary_paths=_bool("LDWARDEN_ALLOW_ARBITRARY_PATHS", False),
+        allow_absolute_paths=_bool("LDWARDEN_ALLOW_ABSOLUTE_PATHS", True),
         git_timeout=_int("LDWARDEN_GIT_TIMEOUT", 120),
         git_token=_str("LDWARDEN_GIT_TOKEN", ""),
         git_username=_str("LDWARDEN_GIT_USERNAME", "x-access-token"),

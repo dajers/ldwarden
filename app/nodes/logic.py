@@ -249,7 +249,7 @@ class RegexNode(BaseNode):
         case_sensitive = bool(params.get("case_sensitive"))
         negate = bool(params.get("negate"))
 
-        # Поля находок: проверяем, что шаблон найден хотя бы в одной находке.
+
         if field.startswith("findings.") and field.split(".", 1)[1] in FINDING_FIELDS:
             attribute = field.split(".", 1)[1]
             try:

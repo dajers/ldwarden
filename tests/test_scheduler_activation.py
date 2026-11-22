@@ -80,7 +80,7 @@ class NextRunTests(unittest.TestCase):
 
     def test_next_run_specific_weekday(self):
         params = {"mode": "weekly", "weekday": "5", "run_time": "09:00", "timezone": "UTC"}
-        now = datetime(2026, 11, 21, 8, 30, tzinfo=timezone.utc)  # суббота
+        now = datetime(2026, 11, 21, 8, 30, tzinfo=timezone.utc)
         scheduled = next_run(params, now)
         self.assertIsNotNone(scheduled)
         self.assertEqual(scheduled.isoweekday(), 5)

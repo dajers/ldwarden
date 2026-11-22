@@ -1,8 +1,8 @@
-/**
- * Мок-движок исполнения графа.
- * Идёт по exec-связям от триггеров, ветвится на logic.branch,
- * события повторяют будущий SSE-контракт бэкенда.
- */
+
+
+
+
+
 
 import { FINDINGS } from './fixtures.js';
 import { SEVERITY_RANK, SEVERITY_LABEL, NODE_TYPES } from './blocks.js';
@@ -64,7 +64,7 @@ export async function runGraph(workflow, { onEvent = () => {}, token = { cancell
   async function walk(node, viaEdge = null) {
     if (!node) return;
 
-    // «Собиратель» ждёт все подключённые входы
+
     if (node.type === 'logic.join') {
       const incoming = edges.filter((edge) => edge.to.node === node.id);
       const arrived = joinArrivals.get(node.id) || new Set();
@@ -310,7 +310,7 @@ function evaluate(params, findings) {
   }
 }
 
-/* ---------- сводки и отчёты ---------- */
+
 
 export function summarize(findings) {
   const by = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };

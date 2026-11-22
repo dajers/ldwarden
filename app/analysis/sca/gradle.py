@@ -456,7 +456,7 @@ def parse_build_gradle(root: Path) -> GradleProject:
                 version_override=constant,
             )
 
-        # Многострочная запись: implementation(group = "...", name = "...", version = "...")
+
         call = re.search(r"\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*\(\s*$", line)
         if call:
             block_lines = [line]
@@ -485,7 +485,7 @@ def parse_build_gradle(root: Path) -> GradleProject:
             line_number = cursor + 1
             continue
 
-        # Переменная как аргумент: implementation(legacyClassTools)
+
         variable = re.search(r"\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", line)
         if variable:
             constant = constants.get(variable.group(1))
@@ -504,7 +504,7 @@ def parse_build_gradle(root: Path) -> GradleProject:
             line_number += 1
             continue
 
-        # Строковые координаты, включая $var и ${var}, и version { strictly(...) }.
+
         for literal in re.finditer(r'"([^"\n]*)"', line):
             raw = _expand_kotlin_vars(literal.group(1), constants)
             if not raw:
@@ -519,9 +519,9 @@ def parse_build_gradle(root: Path) -> GradleProject:
             if not coordinate_match.group("version"):
                 tail_start = literal.end()
                 tail = line[tail_start:]
-                # version { ... } относится к этой зависимости только в блоке
-                # implementation(...) { ... }; не ищем его в следующих строках
-                # для обычных implementation(...) без фигурных скобок.
+
+
+
                 if re.search(r"\)\s*\{|version\s*\{", tail):
                     cursor = line_number
                     while cursor < block_end_line and "strictly" not in tail:

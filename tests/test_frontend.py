@@ -27,7 +27,7 @@ class FrontendServingTests(unittest.TestCase):
         response.close()
 
     def test_static_assets_are_served(self):
-        for path in ("/styles.css", "/js/api.js", "/js/app.js", "/assets/palm.jpg"):
+        for path in ("/styles.css", "/js/api.js", "/js/app.js", "/assets/hedgehog.svg"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
             self.assertGreater(len(response.data), 0, path)

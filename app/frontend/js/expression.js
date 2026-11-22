@@ -1,23 +1,23 @@
-/**
- * Нода «Своё условие» — отдельный модуль.
- *
- * Пользователь пишет выражение, по которому сценарий ветвится на «Да» / «Нет».
- * Выражение разбирается собственным парсером: eval / new Function не используются,
- * поэтому в сценарии нельзя выполнить произвольный код.
- *
- * Синтаксис:
- *   переменные: total, critical, high, medium, low, secret, sca, sast,
- *               hasCritical, hasSecrets, target
- *   операторы:  == != > >= < <=, and / &&, or / ||, not / !
- *   функции:    count(), contains(a, b), matches(text, regex),
- *               anyPath(regex), anyClass(regex), anyMessage(regex)
- *
- * Примеры:
- *   critical >= 1
- *   secret > 0 or sca >= 2
- *   not anyPath("/test/") and total > 0
- *   matches(target, "release/*")
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 const OPERATORS = ['==', '!=', '>=', '<=', '&&', '||'];
 
@@ -284,7 +284,7 @@ function evaluateNode(node, context) {
   }
 }
 
-/** Разбирает и вычисляет выражение. Возвращает { ok, value } либо { ok: false, error }. */
+
 export function evaluateExpression(sourceText, findings = [], target = '') {
   const source = String(sourceText || '').trim();
   if (!source) return { ok: false, error: 'условие пустое' };

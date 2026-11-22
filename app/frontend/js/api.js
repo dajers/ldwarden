@@ -176,6 +176,8 @@ function normalizeTarget(value) {
 
 function targetPayload(workflow) {
   const source = (workflow.nodes || []).find((node) => node.type === 'source.repo');
+  const sourceId = String((source && source.params && source.params.sourceId) || '').trim();
+  if (sourceId) return { kind: 'source', id: sourceId };
   const raw = String((source && source.params && source.params.target) || '').trim();
   if (!raw || raw === 'training-project' || raw === 'training-main/training-project') return null;
   if (/^https?:\/\//i.test(raw)) {
@@ -204,6 +206,7 @@ function mapParamsToBackend(node) {
     case 'source.repo':
       return {
         path: /^https?:\/\//i.test(String(params.target || '')) ? '' : normalizeTarget(params.target),
+        source_id: params.sourceId || '',
         git_token: params.gitToken || '',
         git_username: params.gitUsername || 'x-access-token',
       };
@@ -310,6 +313,8 @@ function mapParamsFromBackend(node) {
     case 'source.target':
       return {
         target: params.path || 'training-project',
+        sourceId: params.source_id || '',
+        sourceName: params.source_name || '',
         branch: 'main',
         gitToken: params.git_token || '',
         gitUsername: params.git_username || 'x-access-token',
@@ -465,7 +470,7 @@ export function fromBackendWorkflow(row) {
     .map((edge) => {
       const target = nodes.find((node) => node.id === edge.target);
       let port = edge.targetHandle || 'in';
-      // у «Собирателя» два входных пина: раскладываем связи по ним
+
       if (target && target.type === 'logic.join') {
         const count = joinCounters.get(target.id) || 0;
         port = count === 0 ? 'a' : 'b';
@@ -694,7 +699,7 @@ async function follow(runId, workflow, handlers, token) {
       try {
         source.close();
       } catch {
-        /* ignore */
+
       }
     };
 
@@ -889,7 +894,7 @@ async function cancel(token) {
   try {
     await request(`/runs/${encodeURIComponent(token.runId)}/cancel`, { method: 'POST' });
   } catch {
-    /* ignore */
+
   }
 }
 
@@ -937,6 +942,39 @@ async function telegramLink(state, chatId, workflowId) {
       workflow_id: workflowId || undefined,
     },
   });
+}
+
+async function uploadSource(file, name = "") {
+  const form = new FormData();
+  form.append("file", file);
+  if (name) form.append("name", name);
+  const headers = {};
+  const token = authToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${CONFIG.baseUrl}/api/sources`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const message = (data && data.error && data.error.message) || `HTTP ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+async function browsePath(path = "") {
+  return request(`/fs/browse?path=${encodeURIComponent(path)}`);
 }
 
 async function models() {
@@ -991,6 +1029,8 @@ export const api = {
   ciSnippets,
   ciCheck,
   models,
+  uploadSource,
+  browsePath,
   libraryPresets,
   libraryInstall,
   publishLibraryNode,

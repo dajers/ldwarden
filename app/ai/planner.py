@@ -164,7 +164,7 @@ def heuristic_workflow(prompt: str, source_hint: str = "") -> dict:
     }
 
 
-# ---------- intent + deterministic composer ----------
+
 
 INTENT_CHECKS = ("secrets", "sca", "sast")
 INTENT_TRIGGERS = ("manual", "schedule", "webhook")
@@ -281,7 +281,7 @@ def _edge(source: str, target: str, handle: str = "out") -> dict:
 
 
 def compose_workflow(intent: dict, source_hint: str = "") -> dict:
-    import app.nodes  # noqa: F401
+    import app.nodes
     trigger = str(intent.get("trigger") or "manual").lower()
     if trigger not in INTENT_TRIGGERS:
         trigger = "manual"
@@ -373,8 +373,8 @@ def compose_workflow(intent: dict, source_hint: str = "") -> dict:
                 **notify_params, "bot_token": "", "chat_id": ""
             }))
         else:
-            # Email-нода удалена из текущего набора; для email используем webhook
-            # с dry-run, чтобы сценарий оставался валидным и запускаемым.
+
+
             nodes.append(_node("notify", "notify.webhook", x, 240, "HTTP webhook", {
                 **notify_params, "url": "local://inbox", "method": "POST", "secret": ""
             }))
@@ -413,7 +413,7 @@ def merge_intent_with_prompt(intent: dict, prompt: str) -> dict:
     return result
 
 
-# ---------- ordered AST ----------
+
 
 AST_NODE_TYPES = {
     "source.target",
@@ -508,7 +508,7 @@ def normalize_ast(raw: dict) -> dict:
 
 
 def compose_ast(ast: dict, source_hint: str = "") -> dict:
-    import app.nodes  # noqa: F401
+    import app.nodes
     ast = normalize_ast(ast)
     trigger = ast["trigger"]
     trigger_type = trigger["type"]

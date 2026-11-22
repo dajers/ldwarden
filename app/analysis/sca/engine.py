@@ -120,7 +120,7 @@ class SCAAnalyzer(BaseAnalyzer):
             dependencies.extend(project.dependencies)
             files_scanned.extend(project.files_scanned)
             warnings.extend(project.warnings)
-        # Один и тот же координата может встретиться в корневом и вложенном build-файле.
+
         unique_dependencies = []
         seen_dependencies: set[tuple[str, str, str | None, str, int]] = set()
         for dependency in dependencies:

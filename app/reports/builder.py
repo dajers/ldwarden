@@ -454,7 +454,7 @@ def build_html(
     parts.append(f"<title>LDWarden — отчёт о проверке безопасности · {html_escape(run_info.get('workflow_name') or '')}</title>")
     parts.append("<style>" + _report_css(palette) + "</style></head><body><div class=\"wrap\">")
 
-    # cover
+
     parts.append('<header class="cover">')
     parts.append('<div class="topline"><div class="brand">'
                  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
@@ -482,7 +482,7 @@ def build_html(
         parts.append(f"<div><span>{html_escape(label)}</span><b>{html_escape(value)}</b></div>")
     parts.append("</div></header>")
 
-    # summary
+
     parts.append('<section class="section" id="summary">')
     parts.append('<div class="section-head"><span class="num">01</span><h2>Резюме</h2></div>')
     parts.append('<div class="summary-grid">')
@@ -525,10 +525,10 @@ def build_html(
         parts.append("</div>")
     parts.append("</section>")
 
-    # toc
+
     parts.append('<nav class="toc"><a href="#summary">01 Резюме</a><a href="#method">02 Методика</a><a href="#findings">03 Находки</a><a href="#ai">04 AI-рекомендации</a><a href="#limitations">05 Ограничения</a></nav>')
 
-    # methodology
+
     parts.append('<section class="section" id="method">')
     parts.append('<div class="section-head"><span class="num">02</span><h2>Методика</h2></div>')
     parts.append('<div class="method-grid">')
@@ -540,7 +540,7 @@ def build_html(
                  f'AI: {html_escape(model or "не использовалась")}; ответ проверяется по JSON-схеме и grounding.</p>')
     parts.append("</section>")
 
-    # findings
+
     parts.append('<section class="section" id="findings">')
     parts.append(f'<div class="section-head"><span class="num">03</span><h2>Находки</h2></div>')
     if not ordered:
@@ -592,7 +592,7 @@ def build_html(
             parts.append("</article>")
     parts.append("</section>")
 
-    # ai
+
     parts.append('<section class="section" id="ai">')
     parts.append('<div class="section-head"><span class="num">04</span><h2>AI-рекомендации</h2></div>')
     if isinstance(ai, dict) and (ai.get("summary") or ai.get("next_steps")):
@@ -608,7 +608,7 @@ def build_html(
         parts.append('<p class="empty">AI-анализ не выполнялся — использованы детерминированные рекомендации анализаторов.</p>')
     parts.append("</section>")
 
-    # limitations
+
     parts.append('<section class="section" id="limitations">')
     parts.append('<div class="section-head"><span class="num">05</span><h2>Ограничения</h2></div>')
     parts.append('<div class="limitations"><ul>'

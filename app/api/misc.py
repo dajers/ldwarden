@@ -48,7 +48,7 @@ def _llm_ready(settings_) -> bool:
         if not settings_.llm_model_path.exists():
             return False
         try:
-            import llama_cpp  # noqa: F401
+            import llama_cpp
         except Exception:
             return False
         return True
@@ -70,7 +70,7 @@ def _llm_error(settings_) -> str:
                 "Укажите LDWARDEN_LLM_MODEL_PATH, например llms/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
             )
         try:
-            import llama_cpp  # noqa: F401
+            import llama_cpp
         except Exception:
             return "Не установлен llama-cpp-python: ./venv/bin/pip install -r requirements-ai.txt"
         return ""
@@ -202,6 +202,38 @@ def upload_source():
         raise ApiError("Поддерживаются только ZIP-архивы", 400, "invalid_file")
     meta = source_service().create_from_zip(file, name=request.form.get("name"))
     return jsonify(meta), 201
+
+
+@bp.get("/fs/browse")
+def fs_browse():
+    settings_ = settings()
+    raw = request.args.get("path") or str(settings_.default_target)
+    try:
+        root = settings_.resolve_allowed_path(raw)
+    except PermissionError as exc:
+        raise ApiError(str(exc), 403, "forbidden_target") from exc
+    except OSError as exc:
+        raise ApiError(f"Некорректный путь: {exc}", 400, "invalid_target") from exc
+    if root.is_file():
+        root = root.parent
+    if not root.is_dir():
+        raise ApiError("Это не каталог", 400, "invalid_target")
+    entries = []
+    for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+        if not child.is_dir():
+            continue
+        try:
+            resolved = settings_.resolve_allowed_path(child)
+        except (PermissionError, OSError):
+            continue
+        entries.append({"name": child.name, "path": str(resolved)})
+        if len(entries) >= 500:
+            break
+    try:
+        parent = str(settings_.resolve_allowed_path(root.parent))
+    except (PermissionError, OSError):
+        parent = ""
+    return jsonify({"path": str(root), "parent": parent, "entries": entries})
 
 
 @bp.get("/sources")

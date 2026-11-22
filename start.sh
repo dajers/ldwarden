@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# LDWarden — запуск в один шаг: venv, зависимости, сервер.
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -181,7 +181,7 @@ class AIService:
 
 
     def generate_workflow(self, prompt: str, source_hint: str = "") -> dict:
-        import app.nodes  # noqa: F401
+        import app.nodes
         import app.ai.planner as planner
 
         request = build_workflow_ast_request(prompt, source_hint=source_hint)
@@ -222,7 +222,7 @@ class AIService:
                         + "; использован эвристический разбор"
                     )
                 elif isinstance(parsed.get("checks"), list):
-                    # Обратная совместимость с предыдущим intent-форматом.
+
                     intent = planner.merge_intent_with_prompt(parsed, prompt)
                     result = planner.compose_workflow(intent, source_hint=source_hint)
                     if (result.get("validation") or {}).get("valid"):

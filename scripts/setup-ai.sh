@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Установка локального LLM-провайдера (llama-cpp-python).
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"

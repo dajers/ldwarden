@@ -395,7 +395,7 @@ def export_definition(node_id: str) -> dict:
     return {"schema": SCHEMA, **definition}
 
 
-# ---------- сетевые правила ----------
+
 
 def get_network_rules() -> dict:
     row = AppSettingRow.get_or_none(AppSettingRow.key == "network_rules")
@@ -781,7 +781,7 @@ def test_definition(node_id: str, params: dict | None = None, settings=None) -> 
         return {"ok": False, "message": str(exc), "error": type(exc).__name__}
 
 
-# ---------- композитные ноды ----------
+
 
 def _composite_boundaries(graph: dict) -> tuple[list[str], list[str]]:
     nodes = [node for node in (graph.get("nodes") or []) if isinstance(node, dict) and node.get("id")]

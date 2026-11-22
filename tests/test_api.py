@@ -185,13 +185,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse((self.settings.data_dir / "evil.txt").exists())
 
-    def test_arbitrary_target_is_rejected_by_default(self):
+    def test_absolute_target_is_allowed(self):
         import tempfile
         from pathlib import Path
 
-        folder = Path(tempfile.mkdtemp(prefix="ldw-arbitrary-target-"))
+        folder = Path(tempfile.mkdtemp(prefix="ldw-absolute-target-"))
         (folder / "app.py").write_text('PASSWORD = "super-secret-value"\n', encoding="utf-8")
         response = self.client.post(
+            "/api/workflows/tpl-full-audit/runs",
+            json={"wait": True, "target": {"kind": "path", "path": str(folder)}},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "success")
+
+    def test_absolute_target_can_be_disabled(self):
+        import tempfile
+        from pathlib import Path
+
+        app, _settings = make_app(allow_absolute_paths=False)
+        client = app.test_client()
+        folder = Path(tempfile.mkdtemp(prefix="ldw-no-absolute-target-"))
+        (folder / "app.py").write_text('PASSWORD = "super-secret-value"\n', encoding="utf-8")
+        response = client.post(
             "/api/workflows/tpl-full-audit/runs",
             json={"wait": True, "target": {"kind": "path", "path": str(folder)}},
         )

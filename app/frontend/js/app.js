@@ -1,7 +1,7 @@
-/**
- * ldwarden — граф-редактор проверок безопасности.
- * Ноды с пинами, провода на безье, панорама и масштаб.
- */
+
+
+
+
 
 import {
   NODE_TYPES,
@@ -27,9 +27,9 @@ import { api } from './api.js';
 import { plural, summarize, toHtml, toMarkdown, toOutputJson } from './engine.js';
 import { evaluateExpression } from './expression.js';
 
-/* ------------------------------------------------------------------ */
-/* утилиты                                                             */
-/* ------------------------------------------------------------------ */
+
+
+
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -105,7 +105,7 @@ async function copy(text, message = 'Скопировано') {
     toast(message, 'ok');
     return;
   } catch {
-    /* запасной путь ниже */
+
   }
   try {
     const area = document.createElement('textarea');
@@ -127,9 +127,9 @@ const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 const snap = (v, step = 10) => Math.round(v / step) * step;
 
 
-/* ------------------------------------------------------------------ */
-/* темы оформления                                                     */
-/* ------------------------------------------------------------------ */
+
+
+
 
 const THEME_KEY = 'sakura.theme';
 const THEMES = ['sakura', 'mono', 'warden', 'github', 'github-dark'];
@@ -141,7 +141,7 @@ function readTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     if (THEMES.includes(saved)) return saved;
   } catch {
-    /* приватный режим */
+
   }
   return 'sakura';
 }
@@ -154,7 +154,7 @@ function applyTheme(theme, { persist = true } = {}) {
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch {
-      /* ignore */
+
     }
   }
   for (const option of $$('.theme-option')) option.classList.toggle('is-active', option.dataset.theme === next);
@@ -192,9 +192,9 @@ function initThemeSwitch() {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* цвет связей                                                         */
-/* ------------------------------------------------------------------ */
+
+
+
 
 let edgeMenuTarget = null;
 
@@ -321,9 +321,9 @@ function initEdgeMenu() {
   window.addEventListener('blur', closeEdgeMenu);
 }
 
-/* ------------------------------------------------------------------ */
-/* состояние                                                           */
-/* ------------------------------------------------------------------ */
+
+
+
 
 const state = {
   workflow: loadWorkflow(),
@@ -419,7 +419,7 @@ async function hydrateRemote() {
       if (state.selectedNode && findNode(state.selectedNode)?.type === 'ai.explain') renderInspector();
     }
   } catch {
-    /* сервер может быть недоступен — работаем локально */
+
   }
   try {
     const remote = await api.loadWorkflow();
@@ -436,7 +436,7 @@ async function hydrateRemote() {
       try {
         localStorage.setItem(LS_WORKFLOW, JSON.stringify(localSnapshot(state.workflow)));
       } catch {
-        /* ignore */
+
       }
       setSavePill(remote.backendId && String(remote.backendId).startsWith('tpl-') ? 'Шаблон с сервера' : 'Синхронизировано', 'ok');
       toast('Сценарий загружен с сервера', 'ok');
@@ -708,7 +708,7 @@ function saveWorkflow(options = {}) {
   try {
     localStorage.setItem(LS_WORKFLOW, JSON.stringify(localSnapshot(state.workflow)));
   } catch {
-    /* приватный режим */
+
   }
   updateActivePreset();
   if (state.compositeEdit) return;
@@ -744,7 +744,7 @@ function saveHistoryEntry(result) {
   try {
     localStorage.setItem(LS_HISTORY, JSON.stringify(state.history));
   } catch {
-    /* переполнение игнорируем */
+
   }
 }
 
@@ -755,9 +755,9 @@ function targetName() {
 
 const findNode = (id) => state.workflow.nodes.find((n) => n.id === id) || null;
 
-/* ------------------------------------------------------------------ */
-/* геометрия и провода                                                 */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function pinPosition(node, portId, dir) {
   const index = Math.max(0, portIndex(node.type, portId, dir));
@@ -808,9 +808,9 @@ function wireGeometry(from, to) {
   return { d, angle };
 }
 
-/* ------------------------------------------------------------------ */
-/* палитра и пресеты                                                  */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function renderPalette() {
   const root = $('#palette');
@@ -869,7 +869,7 @@ function saveCustomPresets() {
   try {
     localStorage.setItem(LS_PRESETS, JSON.stringify(customPresets));
   } catch {
-    /* приватный режим */
+
   }
 }
 
@@ -1070,9 +1070,9 @@ function renderPresets() {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* процессы                                                            */
-/* ------------------------------------------------------------------ */
+
+
+
 
 const RUN_STATUS_META = {
   success: { label: 'Выполнен', tone: 'ok' },
@@ -1378,7 +1378,7 @@ async function openRunDetails(run) {
       root.append(box);
     }
   } catch {
-    /* список находок не критичен */
+
   }
 }
 
@@ -1401,9 +1401,9 @@ async function openWorkflowById(id) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* свои ноды                                                           */
-/* ------------------------------------------------------------------ */
+
+
+
 
 const CUSTOM_ICONS = ['box', 'shield', 'key', 'send', 'search', 'clock', 'package', 'link', 'play', 'gauge'];
 const CUSTOM_PARAM_TYPES = {
@@ -1451,21 +1451,27 @@ function customSpecToType(spec) {
 async function loadCustomCatalog() {
   try {
     const data = await api.nodeCatalog();
+    for (const key of Object.keys(NODE_TYPES)) {
+      if (key.startsWith('custom-')) delete NODE_TYPES[key];
+    }
     for (const spec of (data && data.items) || []) {
-      if (spec.category === 'custom') NODE_TYPES[spec.type] = customSpecToType(spec);
+      const tags = Array.isArray(spec.tags) ? spec.tags : [];
+      if (spec.category === 'custom' && tags.includes('composite')) {
+        NODE_TYPES[spec.type] = customSpecToType(spec);
+      }
     }
     renderPalette();
   } catch {
-    /* сервер может быть недоступен */
+
   }
 }
 
 async function refreshCustomNodes() {
   try {
     const data = await api.customNodes();
-    state.customNodes = (data && data.items) || [];
+    state.customNodes = ((data && data.items) || []).filter((item) => item.kind === 'composite');
   } catch {
-    /* сервер может быть недоступен */
+
   }
   return state.customNodes;
 }
@@ -1480,19 +1486,19 @@ function renderNodesPage() {
   const root = $('#customNodesGrid');
   if (!root) return;
   root.replaceChildren();
-  const items = state.customNodes || [];
+  const items = (state.customNodes || []).filter((item) => item.kind === 'composite');
   if (!items.length) {
     root.append(
       h('div', { class: 'custom-nodes-empty' },
-        h('h2', { text: 'Пока нет своих нод' }),
-        h('p', { text: 'Создайте HTTP- или AI-ноду — она появится в палитре в категории «Мои ноды».' })),
+        h('h2', { text: 'Пока нет композитных нод' }),
+        h('p', { text: 'Выделите ноды на холсте и нажмите «Свернуть в ноду» в верхней панели.' })),
     );
     return;
   }
   for (const item of items) {
-    const kindLabel = item.kind === 'http' ? 'HTTP' : item.kind === 'ai' ? 'AI' : 'Композитная';
+    const kindLabel = 'Композитная';
     const edit = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Изменить' });
-    edit.addEventListener('click', () => openCustomNodeEditor(item));
+    edit.addEventListener('click', () => openCompositeEditor(item.id));
     const use = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'На холст' });
     use.addEventListener('click', () => {
       if (!NODE_TYPES[item.id]) NODE_TYPES[item.id] = customSpecToType({
@@ -1684,7 +1690,7 @@ function openCustomNodeEditor(definition) {
       const headersArea = h('textarea', { class: 'input input--area', rows: '2', placeholder: '{"Authorization": "Bearer …"}' });
       headersArea.value = JSON.stringify(draft.runtime.headers || {}, null, 2);
       headersArea.addEventListener('change', () => {
-        try { draft.runtime.headers = JSON.parse(headersArea.value || '{}'); } catch { /* оставляем как есть */ }
+        try { draft.runtime.headers = JSON.parse(headersArea.value || '{}'); } catch {  }
       });
       const bodyArea = h('textarea', { class: 'input input--area', rows: '3', placeholder: '{"key": "{{params.key}}"}' });
       bodyArea.value = typeof draft.runtime.body === 'string' ? draft.runtime.body : JSON.stringify(draft.runtime.body || '', null, 2);
@@ -1884,9 +1890,9 @@ async function openNetworkRules() {
   $('#modal').hidden = false;
 }
 
-/* ------------------------------------------------------------------ */
-/* композитные ноды                                                    */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function updateCompositeButton() {
   const button = $('#compositeBtn');
@@ -2317,9 +2323,9 @@ function resetStatuses() {
   state.outputs = {};
 }
 
-/* ------------------------------------------------------------------ */
-/* отрисовка графа                                                     */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function isScheduleOnlyWorkflow() {
   const triggers = state.workflow.nodes.filter((node) => node.type.startsWith('trigger.'));
@@ -2535,9 +2541,9 @@ function updateNodeElement(id) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* выбор                                                               */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function syncSelection() {
   for (const el of $$('.node')) {
@@ -2596,9 +2602,9 @@ function clearSelection() {
   renderInspector();
 }
 
-/* ------------------------------------------------------------------ */
-/* инспектор                                                           */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function closeInspector() {
   $('#inspector').classList.remove('is-open');
@@ -2676,7 +2682,7 @@ function openTelegramModal(node) {
       const saved = await api.saveWorkflow(state.workflow);
       if (saved && saved.id) await api.telegramLink(session.state, value, saved.id);
     } catch {
-      /* привязка не критична, chat_id уже в ноде */
+
     }
     closeModal();
     toast(`Telegram подключён: ${chat.title || value}`, 'ok');
@@ -2746,7 +2752,7 @@ function openTelegramModal(node) {
       try {
         openLink.click();
       } catch {
-        /* всплывающее окно могло быть заблокировано — ссылка остаётся в модалке */
+
       }
       toast('В Telegram нажмите Start — ждём подключение…', 'info');
       startPolling(session);
@@ -2790,6 +2796,82 @@ function renderScheduleCheck(node) {
     h('p', { class: 'field__hint', text: 'Планировщик проверяет расписание каждые 30 секунд (пока сервер запущен).' }),
   );
   return wrap;
+}
+
+async function openPathPicker(node) {
+  const title = $('#modalTitle');
+  const body = $('#modalBody');
+  title.textContent = 'Выбрать папку';
+  let data = null;
+  let busy = false;
+  const pathInput = h('input', { class: 'input', type: 'text', value: node.params.target || '' });
+  const list = h('div', { class: 'path-picker__list' });
+  const status = h('p', { class: 'field__hint', text: 'Загрузка…' });
+  const up = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Вверх' });
+  const go = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Перейти' });
+  const choose = h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Выбрать эту папку' });
+  const close = h('button', { class: 'btn btn--ghost', type: 'button', text: 'Отмена' });
+  close.addEventListener('click', closeModal);
+
+  const draw = () => {
+    list.replaceChildren();
+    if (!data) return;
+    pathInput.value = data.path;
+    up.disabled = !data.parent;
+    status.textContent = data.entries.length ? `Папок: ${data.entries.length}` : 'Вложенных папок нет';
+    for (const entry of data.entries) {
+      const item = h('button', { class: 'path-picker__item', type: 'button' },
+        h('span', { class: 'path-picker__icon' }, svgIcon('folder')),
+        h('span', { text: entry.name }));
+      item.addEventListener('click', () => load(entry.path));
+      list.append(item);
+    }
+    if (!data.entries.length) {
+      list.append(h('p', { class: 'field__hint', text: 'В этой папке нет подкаталогов.' }));
+    }
+  };
+
+  const load = async (path) => {
+    if (busy) return;
+    busy = true;
+    status.textContent = 'Загрузка…';
+    try {
+      data = await api.browsePath(path);
+      draw();
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : 'Не удалось открыть папку';
+    } finally {
+      busy = false;
+    }
+  };
+
+  up.addEventListener('click', () => { if (data && data.parent) load(data.parent); });
+  go.addEventListener('click', () => load(pathInput.value.trim()));
+  pathInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') load(pathInput.value.trim());
+  });
+  choose.addEventListener('click', () => {
+    if (!data) return;
+    node.params.target = data.path;
+    node.params.sourceId = '';
+    node.params.sourceName = '';
+    saveWorkflow();
+    closeModal();
+    renderAll();
+    renderInspector();
+    toast(`Источник: ${data.path}`, 'ok');
+  });
+
+  body.replaceChildren(
+    h('p', { class: 'field__hint', text: 'Выберите папку на сервере. Абсолютный путь можно ввести вручную.' }),
+    h('div', { class: 'field' }, h('span', { class: 'field__label', text: 'Текущий путь' }), pathInput),
+    h('div', { class: 'run-detail__actions' }, go, up),
+    list,
+    status,
+    h('div', { class: 'run-detail__actions' }, choose, close),
+  );
+  $('#modal').hidden = false;
+  await load(node.params.sourceId ? '' : (node.params.target || ''));
 }
 
 function renderInspector() {
@@ -2850,6 +2932,54 @@ function renderInspector() {
       h('div', { class: 'field' },
         connect,
         h('p', { class: 'field__hint', text: 'Токен — у @BotFather. Откроется бот: нажмите Start, Chat ID подставится сам.' })),
+    );
+  }
+  if (node.type === 'source.repo') {
+    const fileInput = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true });
+    const upload = h('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, svgIcon('box'), h('span', { text: 'Загрузить ZIP' }));
+    upload.addEventListener('click', () => fileInput.click());
+    const sourceHint = h('p', {
+      class: 'field__hint',
+      text: node.params.sourceId
+        ? `ZIP-источник: ${node.params.sourceName || node.params.sourceId}`
+        : 'ZIP распакуется на сервере; путь или ссылка в поле «Путь или ссылка» не нужны.',
+    });
+    const reset = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Сбросить ZIP' });
+    reset.hidden = !node.params.sourceId;
+    reset.addEventListener('click', () => {
+      node.params.sourceId = '';
+      node.params.sourceName = '';
+      saveWorkflow();
+      renderInspector();
+      toast('ZIP-источник отвязан', 'ok');
+    });
+    const browse = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Выбрать папку' });
+    browse.addEventListener('click', () => openPathPicker(node));
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      if (!file) return;
+      upload.disabled = true;
+      try {
+        const uploaded = await api.uploadSource(file, file.name);
+        node.params.sourceId = uploaded.id;
+        node.params.sourceName = uploaded.name || file.name;
+        node.params.target = '';
+        saveWorkflow();
+        renderAll();
+        renderInspector();
+        toast(`ZIP загружен: ${node.params.sourceName}`, 'ok');
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось загрузить ZIP', 'warn');
+      } finally {
+        upload.disabled = false;
+      }
+    });
+    body.append(
+      h('div', { class: 'field' },
+        h('span', { class: 'field__label', text: 'Источник' }),
+        h('div', { class: 'run-detail__actions' }, upload, browse, reset, fileInput),
+        sourceHint),
     );
   }
   const output = state.outputs[node.id];
@@ -3048,9 +3178,9 @@ function setParam(node, key, value) {
   saveWorkflow();
 }
 
-/* ------------------------------------------------------------------ */
-/* операции с графом                                                   */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function deleteNode(id) {
   state.workflow.nodes = state.workflow.nodes.filter((n) => n.id !== id);
@@ -3122,9 +3252,9 @@ function connectPins(fromNode, fromPort, toNode, toPort) {
   return true;
 }
 
-/* ------------------------------------------------------------------ */
-/* вид: панорама и масштаб                                             */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function applyView() {
   const { x, y, z } = state.view;
@@ -3177,9 +3307,9 @@ function fitView() {
   applyView();
 }
 
-/* ------------------------------------------------------------------ */
-/* перетаскивание: узел, панорама, провод                              */
-/* ------------------------------------------------------------------ */
+
+
+
 
 let interaction = null;
 
@@ -3464,9 +3594,9 @@ function onPointerUp(event) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* запуск                                                              */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function validate() {
   const nodes = state.workflow.nodes;
@@ -3676,9 +3806,9 @@ function finishRun(result, cancelled) {
   if (cancelled) toast('Проверка остановлена', 'warn');
 }
 
-/* ------------------------------------------------------------------ */
-/* результаты                                                          */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function openDrawer() {
   $('#drawer').classList.add('is-open');
@@ -3850,9 +3980,9 @@ function setTab(tab) {
   $('#viewReport').hidden = tab !== 'report';
 }
 
-/* ------------------------------------------------------------------ */
-/* история и экспорт                                                   */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function openModal() {
   $('#modalTitle').textContent = 'История запусков';
@@ -3889,7 +4019,7 @@ function openModal() {
       try {
         localStorage.setItem(LS_HISTORY, JSON.stringify(state.history));
       } catch {
-        /* ignore */
+
       }
       openModal();
     });
@@ -4134,9 +4264,9 @@ async function exportHtml() {
   toast('HTML-отчёт выгружен', 'ok');
 }
 
-/* ------------------------------------------------------------------ */
-/* события интерфейса                                                  */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function bindEvents() {
   for (const tab of $$('#workspaceTabs .workspace-tab')) {
@@ -4149,23 +4279,7 @@ function bindEvents() {
   $('#compositeBtn').addEventListener('click', openCompositeDialog);
   $('#compositeSaveBtn').addEventListener('click', saveCompositeEdit);
   $('#compositeCancelBtn').addEventListener('click', cancelCompositeEdit);
-  $('#customNodeCreateBtn').addEventListener('click', () => openCustomNodeEditor(null));
-  $('#networkRulesBtn').addEventListener('click', openNetworkRules);
-  $('#customNodeImportBtn').addEventListener('click', () => $('#customNodeImportInput').click());
-  $('#customNodeImportInput').addEventListener('change', async (event) => {
-    const file = event.target.files && event.target.files[0];
-    event.target.value = '';
-    if (!file) return;
-    try {
-      const payload = JSON.parse(await file.text());
-      await api.importCustomNode(payload);
-      await loadCustomCatalog();
-      await openNodesView();
-      toast('Нода импортирована', 'ok');
-    } catch (error) {
-      toast(error && error.message ? error.message : 'Не удалось импортировать ноду', 'warn');
-    }
-  });
+  $('#nodesToGraphBtn').addEventListener('click', () => showWorkspace('graph'));
   $('#closeDrawer').addEventListener('click', closeDrawer);
   $('#presetCreateBtn').addEventListener('click', saveCurrentAsPreset);
   $('#presetExportBtn').addEventListener('click', exportCustomPresets);
@@ -4327,9 +4441,9 @@ function bindEvents() {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* старт                                                               */
-/* ------------------------------------------------------------------ */
+
+
+
 
 function init() {
   applyTheme(readTheme(), { persist: false });

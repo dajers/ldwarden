@@ -1,8 +1,8 @@
-/**
- * Каталог узлов графа.
- * Узел = карточка с пинами (exec и data), параметрами и выходными данными.
- * Геометрия узла детерминирована, чтобы провода считались без измерения DOM.
- */
+
+
+
+
+
 
 export const CATEGORIES = {
   trigger: { label: 'Запуск', color: 'var(--cat-trigger)', tint: 'var(--cat-trigger-tint)' },
@@ -20,7 +20,7 @@ export const SEVERITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
 export const SEVERITY_LABEL = { CRITICAL: 'Критично', HIGH: 'Высоко', MEDIUM: 'Средне', LOW: 'Низко' };
 export const SEVERITY_COLOR = { CRITICAL: 'var(--crit)', HIGH: 'var(--bad)', MEDIUM: 'var(--warn)', LOW: 'var(--low)' };
 
-/* ---------- геометрия ---------- */
+
 
 export const NODE_W = 232;
 
@@ -39,7 +39,7 @@ export function nodeHeight(type) {
   return HEADER_H + BODY_PAD + nodeRows(type) * ROW_H + META_H + CHIP_H + 6;
 }
 
-/** Y-координата пина относительно верхней границы узла. */
+
 export function pinOffsetY(type, index) {
   return HEADER_H + BODY_PAD + index * ROW_H + ROW_H / 2;
 }
@@ -50,7 +50,7 @@ export function portIndex(type, portId, dir) {
   return list.findIndex((p) => p.id === portId);
 }
 
-/* ---------- описания узлов ---------- */
+
 
 const REGEX_FIELDS = {
   path: 'путь файла',
@@ -141,7 +141,7 @@ export const NODE_TYPES = {
     cat: 'source',
     icon: 'box',
     title: 'Репозиторий',
-    sub: (p) => p.target,
+    sub: (p) => p.sourceName || p.target,
     inputs: [{ id: 'in', kind: 'exec', label: 'Вход' }],
     outputs: [
       { id: 'out', kind: 'exec', label: 'Выход' },
@@ -155,6 +155,8 @@ export const NODE_TYPES = {
         def: 'training-project',
         hint: 'Можно указать абсолютный путь к любой папке — просканируются все текстовые файлы внутри.',
       },
+      { key: 'sourceId', label: 'ZIP-источник', type: 'text', def: '', hidden: true },
+      { key: 'sourceName', label: 'Название ZIP-источника', type: 'text', def: '', hidden: true },
       { key: 'branch', label: 'Ветка', type: 'text', def: 'main' },
       { key: 'gitToken', label: 'Git-токен', type: 'secret', def: '', hint: 'Для приватного репозитория. Шифруется на сервере; в браузере не сохраняется.' },
       { key: 'gitUsername', label: 'Git-пользователь', type: 'text', def: 'x-access-token', hint: 'GitHub: x-access-token, GitLab: oauth2.' },
@@ -399,7 +401,7 @@ export const NODE_TYPES = {
   },
 };
 
-/* ---------- конструкторы ---------- */
+
 
 const uid = (prefix) => {
   const c = globalThis.crypto;
@@ -450,7 +452,7 @@ export function cloneNode(node, dx = 36, dy = 36) {
   return copy;
 }
 
-/* ---------- пресеты ---------- */
+
 
 function graph(nodes, edges = []) {
   return { nodes, edges };

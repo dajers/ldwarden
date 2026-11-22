@@ -21,5 +21,3 @@ llms/*.gguf
 # Reports generated during demos
 *.sarif
 
-# Собранные архивы
-dist/

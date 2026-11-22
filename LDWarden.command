@@ -1,6 +1,4 @@
 #!/bin/bash
-# Двойной клик: поднимает сервер, открывает сайт и держит окно открытым.
-# Закрыли окно (или нажали Ctrl+C) — сервер останавливается.
 cd "$(dirname "$0")" || exit 1
 
 PORT="${LDWARDEN_PORT:-8000}"
@@ -23,7 +21,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; exit 0' INT TERM HUP
 
-# Если порт уже занят — останавливаем старый экземпляр, чтобы этим сервером управляло это окно.
 if curl -s -o /dev/null "$URL/api/health"; then
   OLD_PID=""
   if command -v lsof >/dev/null 2>&1; then
