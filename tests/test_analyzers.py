@@ -10,7 +10,7 @@ from app.analysis.sca.version import compare_versions, version_in_range, version
 from app.analysis.sast.engine import SASTAnalyzer
 from app.analysis.secrets.engine import SecretAnalyzer
 from app.config import BASE_DIR, load_settings
-from app.core.source import SourceService
+from app.core.source import SourceService, build_tree
 
 TRAINING = BASE_DIR / "training-main" / "training-project"
 GROUND_TRUTH = BASE_DIR / "training-main" / "ground-truth" / "training-findings.json"
@@ -106,6 +106,29 @@ class AnalyzerGroundTruthTests(unittest.TestCase):
             },
         )
 
+
+class NestedGradleProjectTests(unittest.TestCase):
+    def test_sca_finds_project_inside_cloned_repository(self):
+        import tempfile
+
+        root = Path(tempfile.mkdtemp(prefix="ldw-nested-repo-"))
+        project = root / "training-project"
+        project.mkdir()
+        build = project / "build.gradle.kts"
+        build.write_text(
+            'plugins { kotlin("jvm") version "2.2.21" }\n'
+            'repositories { mavenCentral() }\n'
+            'dependencies {\n'
+            '    implementation("org.apache.commons:commons-text:1.9")\n'
+            '}\n',
+            encoding="utf-8",
+        )
+        tree = build_tree(root)
+        settings = load_settings({"seed_templates": False})
+        result = SCAAnalyzer(settings.vulnerability_db_path).analyze(tree)
+        self.assertEqual(len(result.findings), 1)
+        self.assertEqual(result.findings[0].advisory_id, "CVE-2022-42889")
+        self.assertEqual(result.stats["dependencies"], 1)
 
 class VersionTests(unittest.TestCase):
     def test_compare_versions(self):

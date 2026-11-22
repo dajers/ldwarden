@@ -83,6 +83,22 @@ def _preferred_advisory_id(advisory: dict) -> str:
     return ids[0] if ids else ""
 
 
+def _gradle_project_roots(tree: SourceTree, fallback: Path) -> list[Path]:
+    """Найти корни Gradle-проектов, включая вложенные каталоги.
+
+    При клонировании репозитория по URL корнем является весь репозиторий,
+    а сам Gradle-проект может лежать в подпапке (например training-project/).
+    """
+    roots: set[Path] = set()
+    for source_file in tree.files:
+        if Path(source_file.rel_path).name != "build.gradle.kts":
+            continue
+        roots.add(source_file.abs_path.parent.resolve())
+    if (fallback / "build.gradle.kts").exists():
+        roots.add(fallback.resolve())
+    return sorted(roots)
+
+
 class SCAAnalyzer(BaseAnalyzer):
     name = "sca"
     title = "Уязвимые зависимости (SCA)"
@@ -92,16 +108,42 @@ class SCAAnalyzer(BaseAnalyzer):
 
     def analyze(self, tree: SourceTree) -> AnalysisResult:
         root = tree.root if tree.root.is_dir() else tree.root.parent
-        project: GradleProject = parse_build_gradle(root)
+        project_roots = _gradle_project_roots(tree, root)
+        projects = [parse_build_gradle(project_root) for project_root in project_roots]
+        if not projects:
+            projects = [parse_build_gradle(root)]
+
+        dependencies = []
+        files_scanned: list[str] = []
+        warnings: list[str] = []
+        for project in projects:
+            dependencies.extend(project.dependencies)
+            files_scanned.extend(project.files_scanned)
+            warnings.extend(project.warnings)
+        # Один и тот же координата может встретиться в корневом и вложенном build-файле.
+        unique_dependencies = []
+        seen_dependencies: set[tuple[str, str, str | None, str, int]] = set()
+        for dependency in dependencies:
+            key = (
+                dependency.group,
+                dependency.artifact,
+                dependency.version,
+                dependency.file,
+                dependency.line,
+            )
+            if key in seen_dependencies:
+                continue
+            seen_dependencies.add(key)
+            unique_dependencies.append(dependency)
+
         database = load_advisory_db(self.db_path)
-        warnings = list(project.warnings)
-        if database.error:
+        if database.error and database.error not in warnings:
             warnings.append(database.error)
         findings: list[Finding] = []
         seen: set[tuple[str, str, str, str]] = set()
         matched_dependencies = 0
 
-        for dependency in project.dependencies:
+        for dependency in unique_dependencies:
             advisories = database.lookup(dependency.group, dependency.artifact) if database.loaded else []
             dependency_matched = False
             for advisory in advisories:
@@ -124,8 +166,8 @@ class SCAAnalyzer(BaseAnalyzer):
 
         return self._result(
             findings,
-            len(project.files_scanned),
-            dependencies=len(project.dependencies),
+            len(files_scanned),
+            dependencies=len(unique_dependencies),
             matched_dependencies=matched_dependencies,
             advisories_loaded=database.meta.get("count", 0),
             db_path=str(self.db_path),
