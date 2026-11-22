@@ -1,23 +1,32 @@
-# Учебный набор для статического анализа
+# Pavilion Scheduler
 
-**Участники ОБЯЗАНЫ формировать два отчёта с одними и теми же находками SECRET, SAST и SCA.**
+Учебное приложение Cyber Garden 2026 для статической проверки Kotlin и Gradle Kotlin DSL. Приложение намеренно содержит небезопасный код. Записи, идентификаторы и встроенные значения полностью вымышлены. Используйте его только в учебных целях.
 
-1. **Единый JSON-файл** в UTF-8 с массивом `findings` по [спецификации](docs/submission-format.md). См. [пример JSON](docs/training-result-example.json).
-2. **Читаемый отчёт** для быстрого просмотра находок. Подойдёт таблица в интерфейсе, Markdown, HTML или другой удобный формат. Для каждой находки покажите категорию, название, краткое описание проблемы и место в проекте. Для SECRET и SAST укажите файл и строки. Для SCA укажите файл объявления, координаты с версией и CVE или GHSA. Скрывайте значения секретов в обоих отчётах. Ориентируйтесь на [учебную таблицу находок](ground-truth/training-findings.md).
+Гость видит свободные интервалы репетиционных залов. Организатор просматривает свои бронирования и может отменить бронь. Координатор готовит служебную выгрузку. Синтетические расписания хранятся в H2 in-memory. Внешние интеграции моделируются локально.
 
-- **Для всех категорий** — `category` и `path` относительно корня проверяемого проекта.
-- **SECRET и SAST** — `class` и `line`. Для диапазона можно добавить `endLine`.
-- **SCA** — `group`, `artifact`, `version`, `advisoryId`. В `path` укажите файл объявления зависимости, например `build.gradle.kts`.
+Для проверки передайте сканеру исходники, конфигурацию Spring и файлы Gradle. Запуск приложения и разрешение зависимостей не требуются. Учебная область SCA включает явно объявленные зависимости. Для сборки на Linux с JDK 21 выполните `./gradlew --no-daemon clean check bootJar`. На Windows используйте `gradlew.bat`.
 
-## Структура
+Пример записи заголовка в документации: `Authorization: Bearer <token-from-env>`. Значение в угловых скобках обозначает место подстановки.
 
-- [`training-project/`](training-project/) — проект Repair Desk на Kotlin/Spring Boot. В `src/main/` находятся исходники и конфигурация, в `build.gradle.kts` — объявления зависимостей. [Команды сборки](training-project/README.md) пригодятся, если захотите собрать приложение.
-- [`vulnerability-database/`](vulnerability-database/) — [справочник уязвимостей Maven](vulnerability-database/vulnerabilities.json) и его [JSON-схема](vulnerability-database/schema.json).
-- [`ground-truth/`](ground-truth/README.md) — [таблица находок](ground-truth/training-findings.md) и [эталон JSON](ground-truth/training-findings.json) с безопасными контрольными примерами.
-- [`docs/`](docs/) — спецификация JSON-отчёта и учебный пример.
+## Структура проекта
 
-## Как проверить свои анализаторы
+| Папка или файл | Назначение |
+| --- | --- |
+| `README.md` | Назначение проекта, команда сборки и карта файлов. |
+| `.gitignore` | Исключения для кешей Gradle и Kotlin и каталога сборки. |
+| `settings.gradle.kts` | Имя проекта для Gradle. |
+| `build.gradle.kts` | Плагины, JDK 21, зависимости и подключение тестов организаторов. |
+| `gradle.lockfile` | Зафиксированные версии зависимостей `runtimeClasspath`. |
+| `gradlew`, `gradlew.bat` | Запуск Gradle Wrapper на Linux и Windows. |
+| `gradle/wrapper/gradle-wrapper.jar`, `gradle-wrapper.properties` | Код Wrapper, версия и контрольная сумма дистрибутива Gradle. |
+| `src/main/kotlin/lab/pavilion/` | Исходники приложения; список ниже. |
+| `src/main/resources/` | `application.properties` — общие настройки Spring и H2; `application-lab.yml` — настройки профиля `lab`; `schema.sql` — таблицы залов и бронирований; `data.sql` — тестовые записи. |
 
-1. Запустите собственные SECRET, SAST и SCA-анализаторы, передав им `training-project/` как корень проверки. Для статического анализа достаточно файлов проекта, запускать приложение не требуется. Справочник используйте как входные данные для SCA, эталон — для сверки результатов.
-2. Для SCA извлеките явно объявленные зависимости из `build.gradle.kts`. Если версия задана переменной или свойством Gradle, найдите её значение в проекте. Сверьте версию с `gradle.lockfile`. По `group:artifact` найдите записи в справочнике и проверьте их диапазоны `ranges`.
-3. Сформируйте JSON и читаемый отчёт из одного набора находок. Сверьте их с массивом `findings` в эталоне по категории и пути, а затем по классу и строке для SECRET/SAST или по координатам, версии и `advisoryId` для SCA. Проверьте, что участки из массива `controls` не попали в отчёт как уязвимости.
+| Файлы относительно `src/main/kotlin/lab/pavilion/` | Назначение |
+| --- | --- |
+| `PavilionApplication.kt` | Точка входа Spring Boot. |
+| `gateway/` | `AvailabilityRequest.kt` — запрос свободных слотов; `CalendarHttpClient.kt` — HTTPS-клиент расписания; `GatewayCredentials.kt` — заголовки интеграций из настроек; `LegacyScheduleFormats.kt` — импорт старых форматов и HTTP-адаптер; `ReminderSigner.kt` — авторизация запросов к очереди напоминаний. |
+| `policy/` | `PortalAccounts.kt` — учебные учётные записи; `PortalMvcPolicy.kt` — настройки CORS; `PortalSecurity.kt` — правила доступа к маршрутам. |
+| `schedule/` | `CancellationService.kt` — обновление статуса бронирования при отмене. |
+| `storage/` | `ReservationStore.kt` — SQL-запросы для просмотра бронирований организатора. |
+| `web/` | `ReservationActions.kt` — список, просмотр и отмена брони; `StaffExportController.kt` — служебная выгрузка и открытые слоты; `VenueSearchController.kt` — поиск залов. |

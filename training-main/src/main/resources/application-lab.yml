@@ -1,0 +1,4 @@
+schedule:
+  exchange:
+    auth:
+      headerValue: "Bearer cg26_exchange_R8bD3kT6qS2nV5"

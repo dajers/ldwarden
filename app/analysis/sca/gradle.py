@@ -367,6 +367,15 @@ def _resolve_version(
     return text, declaration_file, declaration_line, "literal", warnings
 
 
+def _expand_kotlin_vars(value: str, constants: dict[str, Constant]) -> str:
+    def replace(match: re.Match) -> str:
+        name = match.group(1) or match.group(2)
+        constant = constants.get(name)
+        return constant.value or "" if constant else match.group(0)
+
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", replace, value)
+
+
 def parse_build_gradle(root: Path) -> GradleProject:
     root = Path(root)
     project = GradleProject()
@@ -418,9 +427,11 @@ def parse_build_gradle(root: Path) -> GradleProject:
     block_end_line = _line_of(text, close_index)
     lines = text.splitlines()
 
-    for line_number in range(block_start_line, block_end_line + 1):
+    line_number = block_start_line
+    while line_number <= block_end_line:
         line = lines[line_number - 1]
         if not line.strip() or line.lstrip().startswith("//"):
+            line_number += 1
             continue
         scope = _scope_for_line(lines, line_number - 1)
 
@@ -445,8 +456,59 @@ def parse_build_gradle(root: Path) -> GradleProject:
                 version_override=constant,
             )
 
+        # Многострочная запись: implementation(group = "...", name = "...", version = "...")
+        call = re.search(r"\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*\(\s*$", line)
+        if call:
+            block_lines = [line]
+            cursor = line_number
+            while cursor < block_end_line:
+                cursor += 1
+                block_lines.append(lines[cursor - 1])
+                if ")" in lines[cursor - 1]:
+                    break
+            block = "\n".join(block_lines)
+            group_match = re.search(r'\bgroup\s*=\s*"([^"]+)"', block)
+            name_match = re.search(r'\bname\s*=\s*"([^"]+)"', block)
+            version_match = re.search(r'\bversion\s*=\s*"([^"]+)"', block)
+            if group_match and name_match and version_match:
+                coordinate = f"{group_match.group(1)}:{name_match.group(1)}:{version_match.group(1)}"
+                _append_dependency(
+                    project,
+                    coordinate,
+                    rel_build,
+                    line_number,
+                    scope,
+                    raw=coordinate,
+                    constants=constants,
+                    locked=locked,
+                )
+            line_number = cursor + 1
+            continue
+
+        # Переменная как аргумент: implementation(legacyClassTools)
+        variable = re.search(r"\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", line)
+        if variable:
+            constant = constants.get(variable.group(1))
+            if constant and constant.value:
+                _append_dependency(
+                    project,
+                    constant.value,
+                    rel_build,
+                    line_number,
+                    scope,
+                    raw=variable.group(1),
+                    constants=constants,
+                    locked=locked,
+                    version_override=constant if ":" not in constant.value else None,
+                )
+            line_number += 1
+            continue
+
+        # Строковые координаты, включая $var и ${var}, и version { strictly(...) }.
         for literal in re.finditer(r'"([^"\n]*)"', line):
-            raw = literal.group(1)
+            raw = _expand_kotlin_vars(literal.group(1), constants)
+            if not raw:
+                continue
             coordinate_match = COORDINATE_RE.match(raw)
             if not coordinate_match:
                 continue
@@ -454,6 +516,28 @@ def parse_build_gradle(root: Path) -> GradleProject:
                 continue
             if raw in CONFIGURATIONS:
                 continue
+            if not coordinate_match.group("version"):
+                tail_start = literal.end()
+                tail = line[tail_start:]
+                # version { ... } относится к этой зависимости только в блоке
+                # implementation(...) { ... }; не ищем его в следующих строках
+                # для обычных implementation(...) без фигурных скобок.
+                if re.search(r"\)\s*\{|version\s*\{", tail):
+                    cursor = line_number
+                    while cursor < block_end_line and "strictly" not in tail:
+                        cursor += 1
+                        tail += "\n" + lines[cursor - 1]
+                    strict = re.search(r'strictly\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))\s*\)', tail)
+                else:
+                    strict = None
+                if strict:
+                    if strict.group(1):
+                        version = strict.group(1)
+                    else:
+                        constant = constants.get(strict.group(2))
+                        version = constant.value if constant else None
+                    if version:
+                        raw = f"{raw}:{version}"
             _append_dependency(
                 project,
                 raw,
@@ -464,7 +548,7 @@ def parse_build_gradle(root: Path) -> GradleProject:
                 constants=constants,
                 locked=locked,
             )
-
+        line_number += 1
 
     seen: set[tuple[str, str, str | None, int]] = set()
     unique: list[Dependency] = []

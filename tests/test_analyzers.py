@@ -12,34 +12,14 @@ from app.analysis.secrets.engine import SecretAnalyzer
 from app.config import BASE_DIR, load_settings
 from app.core.source import SourceService, build_tree
 
-TRAINING = BASE_DIR / "training-main" / "training-project"
-GROUND_TRUTH = BASE_DIR / "training-main" / "ground-truth" / "training-findings.json"
+TRAINING = BASE_DIR / "training-main"
 
 
-def _matches(expected: dict, finding) -> bool:
-    if expected.get("category") != finding.category or expected.get("path") != finding.path:
-        return False
-    if expected["category"] in {"SECRET", "SAST"}:
-        if expected.get("class") != finding.class_name:
-            return False
-        line = expected.get("line", 1)
-        end = expected.get("endLine", line)
-        return not ((finding.end_line or finding.line) < line or finding.line > end)
-    if expected.get("group") != finding.group or expected.get("artifact") != finding.artifact:
-        return False
-    if expected.get("version") != finding.version:
-        return False
-    actual = set(finding.advisory_ids or [])
-    if finding.advisory_id:
-        actual.add(finding.advisory_id)
-    return bool(actual & set(expected.get("advisoryIds", [])))
-
-
-class AnalyzerGroundTruthTests(unittest.TestCase):
+class AnalyzerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.settings = load_settings({"seed_templates": False})
-        cls.tree = SourceService(cls.settings).resolve({"kind": "path", "path": str(TRAINING)})
+        cls.tree = SourceService(cls.settings).resolve({"kind": "default"})
         cls.findings = []
         for analyzer in (
             SecretAnalyzer(),
@@ -47,64 +27,52 @@ class AnalyzerGroundTruthTests(unittest.TestCase):
             SASTAnalyzer(),
         ):
             cls.findings.extend(analyzer.analyze(cls.tree).findings)
-        cls.ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
 
-    def test_all_ground_truth_findings_are_detected(self):
-        matched = []
-        missed = []
-        for expected in self.ground_truth["findings"]:
-            if any(_matches(expected, finding) for finding in self.findings):
-                matched.append(expected["id"])
-            else:
-                missed.append(expected["id"])
-        self.assertEqual(missed, [], f"Пропущены эталонные находки: {missed}")
-        self.assertEqual(len(matched), 15)
-
-    def test_no_false_positives_on_controls(self):
-        hits = []
-        for control in self.ground_truth["controls"]:
-            line = control.get("line", 1)
-            end = control.get("endLine", line)
-            for finding in self.findings:
-                if finding.path != control["path"] or finding.category != control["category"]:
-                    continue
-                if finding.line <= end and (finding.end_line or finding.line) >= line:
-                    hits.append((control["id"], finding.class_name, finding.line))
-        self.assertEqual(hits, [])
-
-    def test_exactly_fifteen_findings(self):
-
-
-        self.assertEqual(len(self.findings), 15)
-
-    def test_secret_values_are_masked(self):
-        raw_fragments = ["cg26_parts_", "cg26_quote_", "cg26_depot_", "cg26_warranty_", "cg26_pickup_"]
-        for finding in self.findings:
-            if finding.category != "SECRET":
-                continue
-            blob = json.dumps(finding.to_dict(), ensure_ascii=False)
-            for fragment in raw_fragments:
-                self.assertNotIn(fragment, blob, f"Секрет не замаскирован в {finding.path}:{finding.line}")
-
-    def test_sca_advisories(self):
-        sca = [finding for finding in self.findings if finding.category == "SCA"]
-        self.assertEqual(len(sca), 5)
-        ids = {finding.advisory_id for finding in sca}
-        self.assertIn("CVE-2022-42889", ids)
-        self.assertIn("CVE-2023-5072", ids)
-
-    def test_sast_classes(self):
-        sast = {finding.class_name for finding in self.findings if finding.category == "SAST"}
+    def test_expected_findings(self):
+        self.assertEqual(len(self.findings), 9)
         self.assertEqual(
-            sast,
+            {finding.category for finding in self.findings},
+            {"SECRET", "SCA", "SAST"},
+        )
+
+    def test_secret_findings(self):
+        secrets = {
+            (finding.path, finding.class_name, finding.line)
+            for finding in self.findings
+            if finding.category == "SECRET"
+        }
+        self.assertEqual(
+            secrets,
             {
-                "sql-injection",
-                "tls-verification",
-                "credentialed-cors",
-                "route-authorization",
-                "object-authorization",
+                ("src/main/kotlin/lab/pavilion/gateway/AvailabilityRequest.kt", "api-key", 7),
+                ("src/main/resources/application-lab.yml", "configuration-token", 4),
+                ("src/main/resources/application.properties", "connection-string", 5),
             },
         )
+
+    def test_sca_findings(self):
+        sca = [finding for finding in self.findings if finding.category == "SCA"]
+        self.assertEqual(len(sca), 5)
+        coordinates = {(finding.group, finding.artifact, finding.version) for finding in sca}
+        self.assertEqual(
+            coordinates,
+            {
+                ("org.apache.commons", "commons-configuration2", "2.7"),
+                ("net.minidev", "json-smart", "2.4.8"),
+                ("com.google.code.gson", "gson", "2.8.8"),
+                ("org.apache.commons", "commons-lang3", "3.17.0"),
+                ("org.apache.httpcomponents", "httpclient", "4.5.12"),
+            },
+        )
+        self.assertTrue(all(finding.advisory_id for finding in sca))
+        self.assertFalse(any(finding.artifact == "commons-text" for finding in sca))
+
+    def test_sast_finding(self):
+        sast = [finding for finding in self.findings if finding.category == "SAST"]
+        self.assertEqual(len(sast), 1)
+        self.assertEqual(sast[0].class_name, "tls-verification")
+        self.assertEqual(sast[0].path, "src/main/kotlin/lab/pavilion/gateway/CalendarHttpClient.kt")
+        self.assertEqual(sast[0].line, 16)
 
 
 class NestedGradleProjectTests(unittest.TestCase):
@@ -164,37 +132,45 @@ class GradleParserTests(unittest.TestCase):
         }
 
     def test_declared_dependencies(self):
-        self.assertIn(("org.apache.commons", "commons-text"), self.by_coordinate)
-        self.assertIn(("commons-net", "commons-net"), self.by_coordinate)
-        self.assertIn(("org.json", "json"), self.by_coordinate)
+        self.assertIn(("org.apache.commons", "commons-configuration2"), self.by_coordinate)
+        self.assertIn(("net.minidev", "json-smart"), self.by_coordinate)
+        self.assertIn(("com.google.code.gson", "gson"), self.by_coordinate)
+        self.assertIn(("org.apache.commons", "commons-lang3"), self.by_coordinate)
+        self.assertIn(("org.apache.httpcomponents", "httpclient"), self.by_coordinate)
+        self.assertIn(("org.jsoup", "jsoup"), self.by_coordinate)
 
-    def test_version_property_resolution(self):
-        compress = self.by_coordinate[("org.apache.commons", "commons-compress")]
-        self.assertEqual(compress.version, "1.25.0")
-        self.assertEqual(compress.version_file, "build.gradle.kts")
-        self.assertEqual(compress.version_line, 21)
-        json_dep = self.by_coordinate[("org.json", "json")]
-        self.assertEqual(json_dep.version, "20230227")
-        self.assertEqual(json_dep.version_file, "gradle.properties")
-        self.assertEqual(json_dep.version_line, 1)
+    def test_literal_versions(self):
+        configuration = self.by_coordinate[("org.apache.commons", "commons-configuration2")]
+        self.assertEqual(configuration.version, "2.7")
+        self.assertEqual(configuration.line, 32)
+        smart = self.by_coordinate[("net.minidev", "json-smart")]
+        self.assertEqual(smart.version, "2.4.8")
+        self.assertEqual(smart.line, 33)
+        jsoup = self.by_coordinate[("org.jsoup", "jsoup")]
+        self.assertEqual(jsoup.version, "1.24.1")
 
-    def test_multiline_add(self):
-        commons_net = self.by_coordinate[("commons-net", "commons-net")]
-        self.assertEqual(commons_net.line, 36)
-        self.assertEqual(commons_net.scope, "implementation")
+    def test_multiline_dependency(self):
+        gson = self.by_coordinate[("com.google.code.gson", "gson")]
+        self.assertEqual(gson.version, "2.8.8")
+        self.assertEqual(gson.line, 34)
+        self.assertEqual(gson.scope, "implementation")
+
+    def test_variable_and_strictly_versions(self):
+        lang = self.by_coordinate[("org.apache.commons", "commons-lang3")]
+        self.assertEqual(lang.version, "3.17.0")
+        self.assertEqual(lang.line, 39)
+        httpclient = self.by_coordinate[("org.apache.httpcomponents", "httpclient")]
+        self.assertEqual(httpclient.version, "4.5.12")
+        self.assertEqual(httpclient.line, 40)
 
     def test_safe_control_not_flagged(self):
         from app.analysis.sca.engine import SCAAnalyzer
 
-        findings = SCAAnalyzer(BASE_DIR / "training-main" / "vulnerability-database" / "vulnerabilities.json").analyze(
-            SourceService(load_settings({"seed_templates": False})).resolve(
-                {"kind": "path", "path": str(TRAINING)}
-            )
+        settings = load_settings({"seed_templates": False})
+        findings = SCAAnalyzer(settings.vulnerability_db_path).analyze(
+            SourceService(settings).resolve({"kind": "default"})
         ).findings
-        self.assertFalse(
-            any(f.group == "org.apache.commons" and f.artifact == "commons-lang3" for f in findings)
-        )
-
+        self.assertFalse(any(f.artifact == "jsoup" for f in findings))
 
 if __name__ == "__main__":
     unittest.main()

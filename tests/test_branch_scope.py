@@ -40,7 +40,7 @@ class BranchScopeTests(unittest.TestCase):
             f"/api/workflows/{created['id']}/runs", json={"wait": True, "target": {"kind": "default"}}
         ).get_json()
         self.assertEqual(run["status"], "success")
-        self.assertEqual(run["summary"]["findings"]["total"], 10)
+        self.assertEqual(run["summary"]["findings"]["total"], 4)
         report = self.client.get(f"/api/runs/{run['id']}/report?format=json").get_json()
         self.assertEqual({item["category"] for item in report["findings"]}, {"SAST"})
-        self.assertEqual(len(report["findings"]), 5)
+        self.assertEqual(len(report["findings"]), 1)

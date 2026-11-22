@@ -10,6 +10,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def default_training_target(base: Path = BASE_DIR) -> Path:
+    """Новый training-main лежит корнем, старый — в training-project/."""
+    legacy = base / "training-main" / "training-project"
+    if legacy.is_dir():
+        return legacy
+    return base / "training-main"
+
+
 def _str(name: str, default: str = "") -> str:
     value = os.getenv(name)
     return default if value is None else value.strip()
@@ -57,12 +65,10 @@ class Settings:
     sources_dir: Path = BASE_DIR / "data" / "sources"
     tmp_dir: Path = BASE_DIR / "data" / "tmp"
     secret_key_path: Path = BASE_DIR / "data" / "secret.key"
-    default_target: Path = BASE_DIR / "training-main" / "training-project"
+    default_target: Path = default_training_target()
     allowed_roots: list[Path] = field(default_factory=list)
     allow_arbitrary_paths: bool = False
-    vulnerability_db_path: Path = (
-        BASE_DIR / "training-main" / "vulnerability-database" / "vulnerabilities.json"
-    )
+    vulnerability_db_path: Path = BASE_DIR / "app" / "vulnerability-database" / "vulnerabilities.json"
     workflow_templates_dir: Path = BASE_DIR / "app" / "workflow_templates"
     frontend_dir: Path = BASE_DIR / "app" / "frontend"
 
@@ -272,13 +278,13 @@ def load_settings(overrides: dict | None = None) -> Settings:
         tmp_dir=Path(_str("LDWARDEN_TMP_DIR", str(data_dir / "tmp"))),
         secret_key_path=Path(_str("LDWARDEN_SECRET_KEY_FILE", str(data_dir / "secret.key"))),
         default_target=Path(
-            _str("LDWARDEN_DEFAULT_TARGET", str(BASE_DIR / "training-main" / "training-project"))
+            _str("LDWARDEN_DEFAULT_TARGET", str(default_training_target()))
         ),
         allowed_roots=allowed,
         vulnerability_db_path=Path(
             _str(
                 "LDWARDEN_VULN_DB",
-                str(BASE_DIR / "training-main" / "vulnerability-database" / "vulnerabilities.json"),
+                str(BASE_DIR / "app" / "vulnerability-database" / "vulnerabilities.json"),
             )
         ),
         max_file_bytes=_int("LDWARDEN_MAX_FILE_BYTES", 2 * 1024 * 1024),

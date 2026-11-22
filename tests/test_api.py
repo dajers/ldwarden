@@ -102,7 +102,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         run = response.get_json()
         self.assertEqual(run["status"], "success")
-        self.assertEqual(run["summary"]["findings"]["total"], 15)
+        self.assertEqual(run["summary"]["findings"]["total"], 9)
         run_id = run["id"]
 
         events = self.client.get(f"/api/runs/{run_id}/events").get_json()
@@ -112,7 +112,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("finding", types)
 
         findings = self.client.get(f"/api/runs/{run_id}/findings").get_json()
-        self.assertEqual(findings["count"], 15)
+        self.assertEqual(findings["count"], 9)
         blob = json.dumps(findings, ensure_ascii=False)
         self.assertNotIn("cg26_parts_", blob)
 
@@ -120,7 +120,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(report.status_code, 200)
         self.assertIn("Отчёт о проверке", report.data.decode("utf-8"))
         submission = self.client.get(f"/api/runs/{run_id}/report?format=json").get_json()
-        self.assertEqual(len(submission["findings"]), 15)
+        self.assertEqual(len(submission["findings"]), 9)
         sca = [item for item in submission["findings"] if item["category"] == "SCA"]
         self.assertTrue(all("advisoryId" in item for item in sca))
         self.assertEqual(self.client.get(f"/api/runs/{run_id}/report?format=sarif").status_code, 200)
