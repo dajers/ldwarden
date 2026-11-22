@@ -9,7 +9,7 @@ from app.config import Settings
 
 class RelativePathSettingsTests(unittest.TestCase):
     def test_relative_paths_resolve_from_project_root(self):
-        root = Path(tempfile.mkdtemp(prefix="ldw-relative-"))
+        root = Path(tempfile.mkdtemp(prefix="ldw-relative-")).resolve()
         settings = Settings(
             base_dir=root,
             data_dir="data",

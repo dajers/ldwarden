@@ -230,6 +230,7 @@ def report_response(run_id: str, fmt: str = "md", download: bool = False):
             ai=j_loads(run.ai, None),
             gate=j_loads(run.gate, None),
             source={"label": run.source_label or run.target},
+            theme=(request.args.get("theme") or "sakura").lower(),
         )
         mime, ext = "text/html; charset=utf-8", "html"
     else:

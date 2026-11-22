@@ -26,6 +26,21 @@ class ReportBuildNode(BaseNode):
                 {"value": "md", "label": "Markdown"},
                 {"value": "json", "label": "JSON (submission)"},
                 {"value": "sarif", "label": "SARIF"},
+                {"value": "html", "label": "HTML"},
+            ],
+        ),
+        ParamSpec(
+            "theme",
+            "select",
+            "Стиль HTML",
+            "Тема оформления HTML-отчёта",
+            default="github",
+            options=[
+                {"value": "github", "label": "GitHub"},
+                {"value": "sakura", "label": "Сакура"},
+                {"value": "github-dark", "label": "GitHub Dark"},
+                {"value": "warden", "label": "Варден"},
+                {"value": "mono", "label": "Чёрно-белая"},
             ],
         ),
         ParamSpec("include_ai", "boolean", "Включить AI-объяснения", "", default=True),
@@ -43,8 +58,10 @@ class ReportBuildNode(BaseNode):
             gate=ctx.gate,
             source=ctx.source.to_dict() if ctx.source else None,
             formats=formats,
+            theme=str(params.get("theme") or "github"),
         )
         ctx.reports.update(reports)
+        ctx.vars["report_theme"] = str(params.get("theme") or "github")
         counts = severity_counts(findings)
         sizes = {name: len(value) for name, value in reports.items()}
         ctx.emit(

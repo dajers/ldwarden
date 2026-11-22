@@ -179,7 +179,8 @@ class NotifyNode(BaseNode):
             "source_label": (ctx.source.label if ctx.source else None),
         }
         try:
-            return build_html(ctx.findings, run_info, ai=ctx.ai_analysis, gate=ctx.gate, source=source)
+            theme = str((ctx.vars or {}).get("report_theme") or "github")
+            return build_html(ctx.findings, run_info, ai=ctx.ai_analysis, gate=ctx.gate, source=source, theme=theme)
         except Exception:
             return None
 

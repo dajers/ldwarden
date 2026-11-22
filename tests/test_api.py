@@ -223,7 +223,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("text/html", response.headers["Content-Type"])
         body = response.data.decode("utf-8")
         self.assertIn("LDWarden", body)
-        self.assertIn("Отчёт о проверке безопасности", body)
+        self.assertIn("Отчёт о проверке", body)
+        self.assertIn("безопасности кода", body)
+        github = self.client.get(f"/api/runs/{run['id']}/report?format=html&theme=github")
+        self.assertIn('data-report-theme="github"', github.data.decode("utf-8"))
+        self.assertIn("--accent: #0969da", github.data.decode("utf-8"))
 
     def test_invalid_graph(self):
         draft = self.client.post(

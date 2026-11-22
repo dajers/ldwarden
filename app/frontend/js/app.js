@@ -198,6 +198,44 @@ function initThemeSwitch() {
 
 let edgeMenuTarget = null;
 
+function openEdgeData(edge) {
+  const source = findNode(edge.from.node);
+  const target = findNode(edge.to.node);
+  const output = state.outputs[edge.from.node];
+  const status = state.statuses[edge.from.node] || '';
+  const kind = portKind(source, edge.from.port, 'out');
+  const statusLabel = { done: 'выполнена', error: 'ошибка', running: 'выполняется', skipped: 'пропущена', pending: 'ожидает' }[status] || status || 'не выполнялась';
+  const size = output ? new Blob([JSON.stringify(output)]).size : 0;
+  const rows = [
+    ['Нода-источник', nodeTitle(source)],
+    ['Нода-приёмник', nodeTitle(target)],
+    ['Порт', edge.from.port || 'out'],
+    ['Тип связи', kind === 'data' ? 'данные' : 'выполнение'],
+    ['Статус', statusLabel],
+    ['Размер данных', size ? `${size} Б` : '—'],
+  ];
+  const preview = output ? JSON.stringify(output, null, 2) : 'Нода ещё не выполнялась — данных пока нет.';
+  $('#modalTitle').textContent = 'Данные связи';
+  $('#modalBody').replaceChildren(
+    h('div', { class: 'run-detail__meta edge-data__meta' },
+      ...rows.map(([label, value]) => h('div', {}, h('span', { text: label }), h('b', { text: String(value) })))),
+    h('h3', { class: 'run-detail__subtitle', text: 'Что передаётся' }),
+    h('pre', { class: 'node-editor__test edge-data__preview', text: preview.slice(0, 8000) }),
+    h('div', { class: 'run-detail__actions' },
+      (() => {
+        const sourceButton = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Открыть источник' });
+        sourceButton.addEventListener('click', () => { closeModal(); selectNode(source.id); });
+        return sourceButton;
+      })(),
+      (() => {
+        const targetButton = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Открыть приёмник' });
+        targetButton.addEventListener('click', () => { closeModal(); selectNode(target.id); });
+        return targetButton;
+      })()),
+  );
+  $('#modal').hidden = false;
+}
+
 function openEdgeMenu(edge, x, y) {
   const menu = $('#edgeMenu');
   edgeMenuTarget = edge;
@@ -250,6 +288,14 @@ function initEdgeMenu() {
   $('#edgeCustom').addEventListener('change', (event) => {
     if (!edgeMenuTarget) return;
     setEdgeColor(event.target.value);
+  });
+
+  $('#edgeDataBtn').addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (!edgeMenuTarget) return;
+    const edge = edgeMenuTarget;
+    closeEdgeMenu();
+    openEdgeData(edge);
   });
 
   $('#edgeReset').addEventListener('click', (event) => {
@@ -1221,7 +1267,8 @@ function openScheduleDetails(item) {
 }
 
 function downloadRunFile(runId, format) {
-  fetch(`/api/runs/${encodeURIComponent(runId)}/report?format=${format}&download=1`)
+  const themeQuery = format === 'html' ? `&theme=${encodeURIComponent(currentTheme)}` : '';
+  fetch(`/api/runs/${encodeURIComponent(runId)}/report?format=${format}&download=1${themeQuery}`)
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.blob();
@@ -2449,8 +2496,8 @@ function renderWires() {
 
     g.append(hit, casing, line, arrow);
 
+    const output = state.outputs[from.id];
     if (kind === 'data') {
-      const output = state.outputs[from.id];
       const summary = dataWireSummary(edge, output);
       if (summary) {
         const label = document.createElementNS(NS, 'text');
@@ -2461,12 +2508,12 @@ function renderWires() {
         label.textContent = summary;
         g.append(label);
       }
-      const title = document.createElementNS(NS, 'title');
-      title.textContent = output
-        ? JSON.stringify(output, null, 2).slice(0, 2500)
-        : 'Данные по этой связи ещё не сформированы';
-      g.append(title);
     }
+    const title = document.createElementNS(NS, 'title');
+    title.textContent = output
+      ? `${state.statuses[from.id] || 'нет статуса'} · ${JSON.stringify(output, null, 2).slice(0, 2500)}`
+      : 'Данные по этой связи ещё не сформированы';
+    g.append(title);
 
     frag.append(g);
   }
@@ -4065,7 +4112,7 @@ async function exportHtml() {
   if (api.isRemote && state.run.runId) {
     try {
       const response = await fetch(
-        `/api/runs/${encodeURIComponent(state.run.runId)}/report?format=html&download=1`,
+        `/api/runs/${encodeURIComponent(state.run.runId)}/report?format=html&download=1&theme=${encodeURIComponent(currentTheme)}`,
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();

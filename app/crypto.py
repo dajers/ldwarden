@@ -65,13 +65,10 @@ class SecretBox:
 
 
 def mask_value(value: str | None, keep: int = 3) -> str:
-    """Return a short masked preview that never reveals most of the value."""
+    """Полностью скрывает значение секрета — без префиксов и суффиксов."""
     if not value:
         return ""
-    text = str(value)
-    if len(text) <= keep * 2 + 2:
-        return "•" * min(max(len(text), 4), 10)
-    return f"{text[:keep]}…{text[-keep:]}"
+    return "••••••"
 
 
 def mask_for_api(value: str | None) -> dict:

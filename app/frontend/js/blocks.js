@@ -392,7 +392,10 @@ export const NODE_TYPES = {
       { id: 'findings', kind: 'data', label: 'находки' },
     ],
     outputs: [{ id: 'out', kind: 'exec', label: 'Выход' }],
-    params: [{ key: 'formats', label: 'Форматы', type: 'select', options: ['JSON + Markdown + SARIF', 'JSON + Markdown', 'Только JSON', 'Только Markdown'], def: 'JSON + Markdown' }],
+    params: [
+      { key: 'formats', label: 'Форматы', type: 'select', options: ['JSON + Markdown + SARIF', 'JSON + Markdown', 'Только JSON', 'Только Markdown'], def: 'JSON + Markdown' },
+      { key: 'theme', label: 'Стиль HTML', type: 'select', options: ['GitHub', 'Сакура', 'GitHub Dark', 'Варден', 'Чёрно-белая'], def: 'GitHub', hint: 'Для HTML-файла, который уходит в Telegram или CI.' },
+    ],
   },
 };
 

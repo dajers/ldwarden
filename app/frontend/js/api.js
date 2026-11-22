@@ -87,6 +87,20 @@ const FORMATS_TO_LABEL = {
   'json': 'Только JSON',
   'md': 'Только Markdown',
 };
+const REPORT_THEME_TO_BACKEND = {
+  GitHub: 'github',
+  'Сакура': 'sakura',
+  'GitHub Dark': 'github-dark',
+  'Варден': 'warden',
+  'Чёрно-белая': 'mono',
+};
+const REPORT_THEME_FROM_BACKEND = {
+  github: 'GitHub',
+  sakura: 'Сакура',
+  'github-dark': 'GitHub Dark',
+  warden: 'Варден',
+  mono: 'Чёрно-белая',
+};
 const FORMATS_FROM_LABEL = {
   'JSON + Markdown + SARIF': ['md', 'json', 'sarif'],
   'JSON + Markdown': ['md', 'json'],
@@ -265,7 +279,10 @@ function mapParamsToBackend(node) {
       return { ...base, url: params.token || 'local://inbox', method: 'POST', secret: params.hmacSecret || '' };
     }
     case 'report.build':
-      return { formats: FORMATS_FROM_LABEL[params.formats] || ['md', 'json'] };
+      return {
+        formats: FORMATS_FROM_LABEL[params.formats] || ['md', 'json'],
+        theme: REPORT_THEME_TO_BACKEND[params.theme] || 'github',
+      };
     default:
       return {};
   }
@@ -370,7 +387,10 @@ function mapParamsFromBackend(node) {
     }
     case 'report.build': {
       const formats = Array.isArray(params.formats) ? params.formats.slice().sort().join(',') : 'json,md';
-      return { formats: FORMATS_TO_LABEL[formats] || 'JSON + Markdown' };
+      return {
+        formats: FORMATS_TO_LABEL[formats] || 'JSON + Markdown',
+        theme: REPORT_THEME_FROM_BACKEND[params.theme] || 'GitHub',
+      };
     }
     default:
       return {};

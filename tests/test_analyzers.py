@@ -175,3 +175,11 @@ class GradleParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecretMaskingTests(unittest.TestCase):
+    def test_mask_value_hides_value_completely(self):
+        from app.crypto import mask_value
+
+        self.assertEqual(mask_value("cg2secret6Qp"), "••••••")
+        self.assertEqual(mask_value(""), "")
