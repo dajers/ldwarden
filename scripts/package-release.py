@@ -67,13 +67,15 @@ def add_file(archive: zipfile.ZipFile, path: Path, arc_root: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Собрать портативный ZIP LDWarden")
-    parser.add_argument("--output", default=str(ROOT / "dist" / f"ldwarden-portable-{VERSION}.zip"))
+    parser.add_argument("--version", default=VERSION, help="Версия для имени корня архива")
+    parser.add_argument("--output", default="", help="Путь к ZIP (по умолчанию dist/ldwarden-portable-<version>.zip)")
     parser.add_argument("--include-models", action="store_true", help="Включить llms/*.gguf (архив будет очень большим)")
     args = parser.parse_args(argv)
 
-    output = Path(args.output).expanduser().resolve()
+    version = args.version.lstrip("v")
+    output = Path(args.output or (ROOT / "dist" / f"ldwarden-portable-{version}.zip")).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    arc_root = f"ldwarden-{VERSION}"
+    arc_root = f"ldwarden-{version}"
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for item in INCLUDE:
