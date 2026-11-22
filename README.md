@@ -107,6 +107,62 @@ HTTP-ноды ходят только на разрешённые хосты. С
 был выключен в момент запуска, пропущенный запуск не догоняется. Для старых
 сценариев с cron сохранена обратная совместимость.
 
+## Ветки и отчёты
+
+Отчёт и AI-нода собирают не все находки запуска, а только находки из своих
+upstream-веток. Если «Секреты» и «SAST» идут параллельно, а к отчёту подключён
+только SAST — в отчёте будут только SAST-находки, хотя общий список находок
+запуска останется полным. Чтобы объединить ветки, подключите обе к отчёту
+(или к общему AI/report-узлу).
+
+## Универсальный LLM API
+
+Кроме локальной GGUF и Ollama поддерживается любой OpenAI-совместимый
+`/chat/completions` API: OpenAI, OpenRouter, Groq, Together, LM Studio и другие.
+
+```env
+LDWARDEN_LLM_PROVIDER=universal
+LDWARDEN_LLM_BASE_URL=https://openrouter.ai/api/v1
+LDWARDEN_LLM_API_KEY=...
+LDWARDEN_LLM_MODEL=...
+```
+
+Для нестандартной авторизации:
+
+```env
+LDWARDEN_LLM_AUTH_HEADER=api-key
+LDWARDEN_LLM_AUTH_PREFIX=
+LDWARDEN_LLM_API_HEADERS={"HTTP-Referer":"https://your-app.example"}
+```
+
+`LDWARDEN_LLM_BASE_URL` — базовый URL до `/chat/completions` (можно указать и
+полный URL). Для Ollama достаточно `LDWARDEN_LLM_PROVIDER=ollama`, модель по
+умолчанию `qwen2.5-coder:7b`.
+
+## Генератор сценариев
+
+На вкладке **«Генератор»** опишите задачу текстом. LLM извлекает intent
+(расписание, проверки, AI, gate, уведомление), а детерминированный composer
+собирает валидный граф из встроенных нод. Сценарий показывается в превью и
+открывается в конструкторе по кнопке.
+
+## CI/CD
+
+В приложении есть отдельная вкладка **CI/CD**: выберите workflow, базовый URL
+LDWarden и при необходимости путь к checkout на runner — приложение сгенерирует
+`GitHub Actions` или `GitLab CI` конфиг с запуском, отчётами и artifacts.
+
+Секрет CI:
+
+```env
+LDWARDEN_CI_TOKEN=...
+```
+
+В CI он передаётся как `X-CI-Token`. Gate возвращает exit code: `0` — успех,
+`1` — ошибка или непройденный порог, `2` — отмена. Для GitHub-hosted runner
+LDWarden должен видеть `$GITHUB_WORKSPACE`; используйте self-hosted runner,
+ZIP-загрузку или общий volume.
+
 ## Библиотека шаблонов
 
 В библиотеке два типа объектов — **пресеты** и **ноды**, переключатель «Все / Пресеты / Ноды»

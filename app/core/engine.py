@@ -189,12 +189,43 @@ class RunContext:
 
     def add_findings(self, findings: list[Finding], node_id: str | None = None) -> int:
         before = {finding.fingerprint for finding in self.findings}
+        origin = node_id or self.node_id or ""
         for finding in findings:
             if not finding.source_node:
                 finding.source_node = self.node_id or ""
+            if not isinstance(finding.extra, dict):
+                finding.extra = {}
+            finding.extra.setdefault("origin_node", origin)
         self.findings = dedupe_findings(self.findings + findings)
         after = {finding.fingerprint for finding in self.findings}
         return len(after - before)
+
+    def upstream_node_ids(self, node_id: str | None = None) -> set[str]:
+        target = node_id or self.node_id
+        if not target:
+            return set()
+        incoming: dict[str, list[str]] = {}
+        for edge in (self.graph or {}).get("edges", []):
+            incoming.setdefault(str(edge.get("target")), []).append(str(edge.get("source")))
+        seen: set[str] = set()
+        queue = [target]
+        while queue:
+            current = queue.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            queue.extend(incoming.get(current, []))
+        return seen
+
+    def findings_for_node(self, node_id: str | None = None) -> list[Finding]:
+        targets = self.upstream_node_ids(node_id)
+        if not targets:
+            return list(self.findings)
+        return [
+            finding
+            for finding in self.findings
+            if finding.extra.get("origin_node") in targets
+        ]
 
 
     def display_status(self) -> str:

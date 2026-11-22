@@ -77,6 +77,9 @@ class Settings:
     llm_model_path: Path = BASE_DIR / "llms" / "qwen2.5-coder-7b-instruct-q4_k_m.gguf"
     llm_base_url: str = ""
     llm_api_key: str = ""
+    llm_api_headers: str = ""
+    llm_auth_header: str = "Authorization"
+    llm_auth_prefix: str = "Bearer"
     llm_model: str = ""
     llm_timeout: int = 180
     llm_max_findings: int = 30
@@ -273,6 +276,9 @@ def load_settings(overrides: dict | None = None) -> Settings:
         ),
         llm_base_url=_str("LDWARDEN_LLM_BASE_URL", ""),
         llm_api_key=_str("LDWARDEN_LLM_API_KEY", ""),
+        llm_api_headers=_str("LDWARDEN_LLM_API_HEADERS", ""),
+        llm_auth_header=_str("LDWARDEN_LLM_AUTH_HEADER", "Authorization"),
+        llm_auth_prefix=_str("LDWARDEN_LLM_AUTH_PREFIX", "Bearer"),
         llm_model=_str("LDWARDEN_LLM_MODEL", ""),
         llm_timeout=_int("LDWARDEN_LLM_TIMEOUT", 180),
         llm_max_findings=_int("LDWARDEN_LLM_MAX_FINDINGS", 30),

@@ -159,6 +159,8 @@ class ScheduleService:
                 if node.get("type") != "trigger.schedule":
                     continue
                 params = (node.get("data") or {}).get("params") or {}
+                if params.get("enabled") is False or (node.get("data") or {}).get("disabled"):
+                    continue
                 cron = str(params.get("cron") or "")
                 timezone_name = str(params.get("timezone") or self.settings.scheduler_timezone)
                 try:

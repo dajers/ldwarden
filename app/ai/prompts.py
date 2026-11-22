@@ -102,3 +102,38 @@ def build_workflow_request(prompt: str, node_catalog: list[dict], source_hint: s
         },
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def build_workflow_intent_request(prompt: str, source_hint: str = "") -> str:
+    payload = {
+        "task": "extract_workflow_intent",
+        "language": "ru",
+        "rules": [
+            "Верни только JSON-объект без markdown.",
+            "Не придумывай новые типы проверок.",
+            "checks: только secrets, sca, sast.",
+            "trigger: manual, schedule или webhook.",
+            "Если нужен CI — trigger=webhook и gate HIGH (если не указан другой порог).",
+            "Если запуск по времени — trigger=schedule; schedule_mode=weekly или once; время HH:MM.",
+            "Если указан день недели — schedule_weekday: * или 1..7 (понедельник=1).",
+            "Если указана конкретная дата — schedule_mode=once и schedule_date YYYY-MM-DD.",
+            "notify: none, email, telegram или webhook.",
+        ],
+        "response_schema": {
+            "name": "string",
+            "description": "string",
+            "trigger": "manual|schedule|webhook",
+            "schedule_mode": "weekly|once",
+            "schedule_date": "YYYY-MM-DD или пусто",
+            "schedule_time": "HH:MM",
+            "schedule_weekday": "*|1|2|3|4|5|6|7",
+            "checks": ["secrets", "sca", "sast"],
+            "ai": "boolean",
+            "gate": "none|LOW|MEDIUM|HIGH|CRITICAL",
+            "notify": "none|email|telegram|webhook",
+            "report_formats": ["md", "json", "sarif"],
+        },
+        "user_request": prompt,
+        "source_hint": source_hint,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)

@@ -100,6 +100,35 @@ class AIServiceTests(unittest.TestCase):
         self.assertEqual(result["provider"], "none")
         self.assertEqual(result["overall_risk"], "LOW")
 
+    def test_llm_intent_is_composed(self):
+        provider = FakeProvider(
+            response={
+                "name": "Ночной аудит",
+                "description": "Проверка по расписанию",
+                "trigger": "schedule",
+                "schedule_mode": "weekly",
+                "schedule_time": "23:30",
+                "schedule_weekday": "5",
+                "checks": ["secrets", "sast"],
+                "ai": True,
+                "gate": "HIGH",
+                "notify": "telegram",
+                "report_formats": ["md", "json"],
+            }
+        )
+        result = AIService(self.settings, provider=provider).generate_workflow("Ночной аудит")
+        self.assertEqual(result["provider"], "fake")
+        self.assertTrue(result["validation"]["valid"])
+        types = [node["type"] for node in result["graph"]["nodes"]]
+        self.assertIn("trigger.schedule", types)
+        self.assertIn("scan.secrets", types)
+        self.assertIn("scan.sast", types)
+        self.assertIn("control.severity_gate", types)
+        self.assertIn("notify.telegram", types)
+        schedule = next(node for node in result["graph"]["nodes"] if node["type"] == "trigger.schedule")
+        self.assertEqual(schedule["data"]["params"]["run_time"], "23:30")
+        self.assertEqual(schedule["data"]["params"]["weekday"], "5")
+
     def test_heuristic_workflow_generation(self):
         service = AIService(self.settings, provider=NullProvider())
         result = service.generate_workflow(
@@ -109,11 +138,12 @@ class AIServiceTests(unittest.TestCase):
         types = [node["type"] for node in result["graph"]["nodes"]]
         self.assertIn("trigger.schedule", types)
         self.assertIn("scan.secrets", types)
-        self.assertIn("notify.send", types)
+        self.assertIn("notify.webhook", types)
         schedule = next(node for node in result["graph"]["nodes"] if node["type"] == "trigger.schedule")
-        self.assertEqual(schedule["data"]["params"]["cron"], "0 14 * * *")
-        notify = next(node for node in result["graph"]["nodes"] if node["type"] == "notify.send")
-        self.assertEqual(notify["data"]["params"]["channel"], "webhook")
+        self.assertEqual(schedule["data"]["params"]["run_time"], "14:00")
+        self.assertEqual(schedule["data"]["params"]["mode"], "weekly")
+        notify = next(node for node in result["graph"]["nodes"] if node["type"] == "notify.webhook")
+        self.assertEqual(notify["data"]["params"]["url"], "local://inbox")
 
     def test_heuristic_ci_workflow(self):
         service = AIService(self.settings, provider=NullProvider())

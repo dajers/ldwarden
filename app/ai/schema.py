@@ -63,3 +63,29 @@ PLANNER_SCHEMA = {
         },
     },
 }
+
+WORKFLOW_INTENT_SCHEMA = {
+    "type": "object",
+    "required": ["trigger", "checks"],
+    "additionalProperties": True,
+    "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "trigger": {"type": "string", "enum": ["manual", "schedule", "webhook"]},
+        "schedule_mode": {"type": "string", "enum": ["weekly", "once"]},
+        "schedule_date": {"type": "string"},
+        "schedule_time": {"type": "string"},
+        "schedule_weekday": {"type": "string"},
+        "checks": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["secrets", "sca", "sast"]},
+        },
+        "ai": {"type": "boolean"},
+        "gate": {"type": "string", "enum": ["none", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "notify": {"type": "string", "enum": ["none", "email", "telegram", "webhook"]},
+        "report_formats": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["md", "json", "sarif"]},
+        },
+    },
+}

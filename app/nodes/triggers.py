@@ -54,6 +54,13 @@ class ScheduleTrigger(BaseNode):
     outputs = [HandleSpec("out", "Запуск")]
     params = [
         ParamSpec(
+            "enabled",
+            "boolean",
+            "Включено",
+            "Выключенное расписание не запускается",
+            default=True,
+        ),
+        ParamSpec(
             "mode",
             "select",
             "Режим",

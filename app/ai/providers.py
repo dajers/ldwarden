@@ -171,12 +171,18 @@ class OpenAICompatibleProvider(LLMProvider):
         api_key: str = "",
         timeout: int = 180,
         provider_name: str = "openai",
+        headers: dict | None = None,
+        auth_header: str = "Authorization",
+        auth_prefix: str = "Bearer",
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.name = provider_name
+        self.headers = dict(headers or {})
+        self.auth_header = auth_header or "Authorization"
+        self.auth_prefix = auth_prefix
 
     def complete(
         self,
@@ -197,10 +203,10 @@ class OpenAICompatibleProvider(LLMProvider):
             import httpx
         except Exception as exc:
             raise ProviderUnavailable(f"httpx недоступен: {exc}") from exc
-        url = self.base_url + "/chat/completions"
-        headers = {"Content-Type": "application/json"}
+        url = self.base_url if self.base_url.endswith("/chat/completions") else self.base_url + "/chat/completions"
+        headers = {"Content-Type": "application/json", **self.headers}
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers[self.auth_header] = f"{self.auth_prefix} {self.api_key}".strip()
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -306,8 +312,11 @@ def get_openai_provider(
     api_key: str = "",
     timeout: int = 180,
     provider_name: str = "openai",
+    headers: dict | None = None,
+    auth_header: str = "Authorization",
+    auth_prefix: str = "Bearer",
 ) -> LLMProvider:
-    key = (provider_name, base_url.rstrip("/"), model, api_key, int(timeout))
+    key = (provider_name, base_url.rstrip("/"), model, api_key, int(timeout), auth_header, auth_prefix, json.dumps(headers or {}, sort_keys=True))
     return _cached(
         key,
         lambda: OpenAICompatibleProvider(
@@ -316,6 +325,9 @@ def get_openai_provider(
             api_key=api_key,
             timeout=timeout,
             provider_name=provider_name,
+            headers=headers,
+            auth_header=auth_header,
+            auth_prefix=auth_prefix,
         ),
     )
 
@@ -328,18 +340,27 @@ def build_provider(settings: Settings) -> LLMProvider:
             n_ctx=settings.llm_n_ctx,
             n_threads=settings.llm_n_threads,
         )
-    if provider in {"openai", "ollama"}:
+    if provider in {"openai", "ollama", "universal"}:
         base_url = settings.llm_base_url
         model = settings.llm_model
         if provider == "ollama":
             base_url = base_url or "http://127.0.0.1:11434/v1"
             model = model or "qwen2.5-coder:7b"
+        try:
+            extra_headers = json.loads(settings.llm_api_headers or "{}")
+        except ValueError:
+            extra_headers = {}
+        if not isinstance(extra_headers, dict):
+            extra_headers = {}
         return get_openai_provider(
             base_url=base_url,
             model=model,
             api_key=settings.llm_api_key,
             timeout=settings.llm_timeout,
             provider_name=provider,
+            headers={str(k): str(v) for k, v in extra_headers.items()},
+            auth_header=settings.llm_auth_header,
+            auth_prefix=settings.llm_auth_prefix,
         )
     if provider == "fake":
         return FakeProvider()

@@ -315,8 +315,25 @@ const state = {
   customNodes: [],
   customCatalog: {},
   compositeEdit: null,
+  ciWorkflows: null,
+  ciWorkflowId: '',
+  ciPlatform: 'github',
+  ciSnippet: '',
+  ciInfo: null,
+  ciLoading: false,
+  ciError: '',
+  ciBaseUrl: '',
+  ciTarget: '',
+  generatorResult: null,
+  generatorLoading: false,
+  generatorError: '',
+  undoStack: [],
+  redoStack: [],
+  historyCurrent: null,
+  clipboard: null,
 };
 
+state.historyCurrent = clone(state.workflow);
 let customPresets = loadCustomPresets();
 let syncTimer = null;
 let syncWarned = false;
@@ -367,6 +384,7 @@ async function hydrateRemote() {
       state.selectedEdge = null;
       state.activePresetId = null;
       resetStatuses();
+      resetHistory();
       renderAll();
       fitView();
       try {
@@ -386,13 +404,14 @@ async function hydrateRemote() {
 }
 
 async function syncRemote() {
-  if (!api.isRemote || !state.workflow.nodes.length) return;
+  if (!api.isRemote || !state.workflow.nodes.length) return false;
   try {
     const saved = await api.saveWorkflow(state.workflow);
     if (saved && saved.id) {
       state.workflow.backendId = saved.id;
       setSavePill('Сохранено на сервере', 'ok');
       syncWarned = false;
+      return true;
     }
   } catch (error) {
     setSavePill('Локальный черновик');
@@ -401,6 +420,7 @@ async function syncRemote() {
       toast(error && error.message ? error.message : 'Не удалось сохранить на сервере', 'warn');
     }
   }
+  return false;
 }
 
 function migrateLegacyNotify(node) {
@@ -539,7 +559,97 @@ function updateActivePreset() {
   saveCustomPresets();
 }
 
-function saveWorkflow() {
+function resetHistory() {
+  state.undoStack = [];
+  state.redoStack = [];
+  state.historyCurrent = clone(state.workflow);
+}
+
+function recordHistory() {
+  const current = clone(state.workflow);
+  if (!state.historyCurrent) {
+    state.historyCurrent = current;
+    return;
+  }
+  if (JSON.stringify(current) === JSON.stringify(state.historyCurrent)) return;
+  state.undoStack.push(state.historyCurrent);
+  state.undoStack = state.undoStack.slice(-50);
+  state.redoStack = [];
+  state.historyCurrent = current;
+}
+
+function undo() {
+  if (!state.undoStack.length) return false;
+  const previous = state.undoStack.pop();
+  state.redoStack.push(clone(state.workflow));
+  state.workflow = previous;
+  state.historyCurrent = clone(previous);
+  state.selectedNode = null;
+  state.selectedNodes = [];
+  state.selectedEdge = null;
+  renderAll();
+  renderInspector();
+  saveWorkflow({ noHistory: true });
+  toast('Действие отменено', 'ok');
+  return true;
+}
+
+function redo() {
+  if (!state.redoStack.length) return false;
+  const next = state.redoStack.pop();
+  state.undoStack.push(clone(state.workflow));
+  state.workflow = next;
+  state.historyCurrent = clone(next);
+  state.selectedNode = null;
+  state.selectedNodes = [];
+  state.selectedEdge = null;
+  renderAll();
+  renderInspector();
+  saveWorkflow({ noHistory: true });
+  toast('Действие повторено', 'ok');
+  return true;
+}
+
+function copySelectedNodes() {
+  const ids = new Set(state.selectedNodes || []);
+  if (!ids.size) return false;
+  const nodes = state.workflow.nodes.filter((node) => ids.has(node.id));
+  const edges = state.workflow.edges.filter(
+    (edge) => ids.has(edge.from.node) && ids.has(edge.to.node),
+  );
+  state.clipboard = { nodes: clone(nodes), edges: clone(edges) };
+  toast(`Скопировано узлов: ${nodes.length}`, 'ok');
+  return true;
+}
+
+function pasteNodes() {
+  if (!state.clipboard || !state.clipboard.nodes.length) return false;
+  const idMap = new Map();
+  const pasted = state.clipboard.nodes.map((node) => {
+    const id = 'n-' + Math.random().toString(36).slice(2, 9);
+    idMap.set(node.id, id);
+    return { ...clone(node), id, x: (Number(node.x) || 0) + 40, y: (Number(node.y) || 0) + 40 };
+  });
+  const pastedEdges = state.clipboard.edges.map((edge) => ({
+    ...clone(edge),
+    id: 'e-' + Math.random().toString(36).slice(2, 9),
+    from: { ...edge.from, node: idMap.get(edge.from.node) },
+    to: { ...edge.to, node: idMap.get(edge.to.node) },
+  })).filter((edge) => idMap.has(edge.from.node) && idMap.has(edge.to.node));
+  state.workflow.nodes.push(...pasted);
+  state.workflow.edges.push(...pastedEdges);
+  state.selectedNode = pasted[0] ? pasted[0].id : null;
+  state.selectedNodes = pasted.map((node) => node.id);
+  state.selectedEdge = null;
+  renderAll();
+  renderInspector();
+  saveWorkflow();
+  toast(`Вставлено узлов: ${pasted.length}`, 'ok');
+  return true;
+}
+
+function saveWorkflow(options = {}) {
+  if (!options.noHistory) recordHistory();
   try {
     localStorage.setItem(LS_WORKFLOW, JSON.stringify(localSnapshot(state.workflow)));
   } catch {
@@ -684,6 +794,10 @@ function saveCustomPresets() {
 }
 
 function saveCurrentAsPreset() {
+  if (!state.workflow.nodes.length) {
+    toast('Сначала добавьте узлы в сценарий', 'warn');
+    return;
+  }
   const suggested = state.workflow.name && state.workflow.name !== 'Новый сценарий' ? state.workflow.name : 'Мой пресет';
   const name = window.prompt('Название пресета', suggested);
   if (!name || !name.trim()) return;
@@ -700,6 +814,7 @@ function saveCurrentAsPreset() {
   customPresets = [...customPresets.filter((item) => item.name !== preset.name), preset].slice(-20);
   state.activePresetId = preset.id;
   saveCustomPresets();
+  saveWorkflow();
   renderPresets();
   toast(`Пресет «${preset.name}» сохранён`, 'ok');
 }
@@ -997,13 +1112,26 @@ function renderScheduledRow(item) {
   const status = item.valid ? { label: 'Ожидает', tone: 'wait' } : { label: 'Не сработает', tone: 'bad' };
   const details = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Подробнее' });
   details.addEventListener('click', () => openScheduleDetails(item));
+  const cancel = h('button', { class: 'btn btn--ghost btn--sm run-stop', type: 'button', text: 'Отменить' });
+  cancel.addEventListener('click', async () => {
+    if (!window.confirm('Отменить это расписание? Регулярные запуски больше не будут выполняться.')) return;
+    cancel.disabled = true;
+    try {
+      await api.cancelSchedule(item.workflow_id, item.node_id);
+      toast('Расписание отменено', 'ok');
+      await loadRuns(true);
+    } catch (error) {
+      toast(error && error.message ? error.message : 'Не удалось отменить расписание', 'warn');
+      cancel.disabled = false;
+    }
+  });
   return h('div', { class: 'run-row' },
     h('div', { class: 'run-row__main' },
       h('div', { class: 'run-row__title' },
         h('b', { text: item.workflow_name || item.workflow_id }),
         h('span', { class: `run-chip run-chip--${status.tone}`, text: status.label })),
       h('div', { class: 'run-row__meta', text: `${scheduleLabel(item)} · ${item.timezone} · ${item.valid ? `запуск ${runWhen(item.next_run)}` : 'проверьте дату/время'}` })),
-    h('div', { class: 'run-row__actions' }, details));
+    h('div', { class: 'run-row__actions' }, details, cancel));
 }
 
 function renderRunRow(run) {
@@ -1012,13 +1140,29 @@ function renderRunRow(run) {
   const total = findings.total !== undefined ? findings.total : run.findings_count || 0;
   const details = h('button', { class: 'btn btn--ghost btn--sm', type: 'button', text: 'Подробнее' });
   details.addEventListener('click', () => openRunDetails(run));
+  const actions = [details];
+  if (['running', 'queued', 'pending'].includes(run.status)) {
+    const stop = h('button', { class: 'btn btn--ghost btn--sm run-stop', type: 'button', text: 'Остановить' });
+    stop.addEventListener('click', async () => {
+      stop.disabled = true;
+      try {
+        await api.cancelRun(run.id);
+        toast('Запуск остановлен', 'ok');
+        await loadRuns(true);
+      } catch (error) {
+        toast(error && error.message ? error.message : 'Не удалось остановить запуск', 'warn');
+        stop.disabled = false;
+      }
+    });
+    actions.push(stop);
+  }
   return h('div', { class: 'run-row' },
     h('div', { class: 'run-row__main' },
       h('div', { class: 'run-row__title' },
         h('b', { text: run.workflow_name || 'Сценарий' }),
         h('span', { class: `run-chip run-chip--${status.tone}`, text: status.label })),
       h('div', { class: 'run-row__meta', text: `${triggerLabel(run.trigger)} · ${runWhen(run.created_at)} · ${runDuration(run.duration_ms)} · ${total} ${plural(total, 'находка', 'находки', 'находок')}` })),
-    h('div', { class: 'run-row__actions' }, details));
+    h('div', { class: 'run-row__actions' }, ...actions));
 }
 
 function openScheduleDetails(item) {
@@ -1802,26 +1946,256 @@ function cancelCompositeEdit() {
   renderAll();
 }
 
+function openCiView() {
+  renderCiPage();
+  if (!state.ciWorkflows || !state.ciWorkflows.length) loadCiView();
+}
+
+async function loadCiView(force = false) {
+  if (state.ciLoading) return;
+  state.ciLoading = true;
+  state.ciError = '';
+  renderCiPage();
+  try {
+    const data = await api.workflows();
+    const all = (data && data.items) || [];
+    const byName = new Map();
+    for (const workflow of all) {
+      const key = workflow.name || workflow.id;
+      const previous = byName.get(key);
+      if (!previous || String(workflow.updated_at || '') > String(previous.updated_at || '')) {
+        byName.set(key, workflow);
+      }
+    }
+    state.ciWorkflows = [...byName.values()];
+    const current = all.find((item) => item.id === state.workflow.backendId);
+    const preferred = state.ciWorkflowId && state.ciWorkflows.some((item) => item.id === state.ciWorkflowId)
+      ? state.ciWorkflowId
+      : current
+        ? (byName.get(current.name) || {}).id || ''
+        : (state.ciWorkflows.find((item) => !item.is_template) || state.ciWorkflows[0] || {}).id || '';
+    state.ciWorkflowId = preferred;
+    await generateCiSnippet();
+  } catch (error) {
+    state.ciError = error && error.message ? error.message : 'Не удалось загрузить workflows';
+  } finally {
+    state.ciLoading = false;
+    renderCiPage();
+  }
+}
+
+async function generateCiSnippet() {
+  const select = $('#ciWorkflow');
+  const workflowId = select ? select.value : state.ciWorkflowId;
+  if (!workflowId) {
+    state.ciError = 'Выберите workflow';
+    renderCiPage();
+    return;
+  }
+  state.ciWorkflowId = workflowId;
+  state.ciBaseUrl = ($('#ciBaseUrl') && $('#ciBaseUrl').value.trim()) || state.ciBaseUrl || location.origin;
+  const target = ($('#ciTarget') && $('#ciTarget').value.trim()) || '';
+  state.ciLoading = true;
+  state.ciError = '';
+  renderCiPage();
+  try {
+    state.ciInfo = await api.ciSnippets({
+      workflow_id: workflowId,
+      base_url: state.ciBaseUrl,
+      target,
+    });
+  } catch (error) {
+    state.ciError = error && error.message ? error.message : 'Не удалось сгенерировать конфиг';
+  } finally {
+    state.ciLoading = false;
+    renderCiPage();
+  }
+}
+
+function renderCiPage() {
+  const select = $('#ciWorkflow');
+  if (!select) return;
+  const selected = state.ciWorkflowId;
+  select.replaceChildren();
+  for (const workflow of state.ciWorkflows || []) {
+    const option = h('option', { value: workflow.id, text: workflow.is_template ? `${workflow.name} · шаблон` : workflow.name });
+    if (workflow.id === selected) option.selected = true;
+    select.append(option);
+  }
+  if (!state.ciWorkflows || !state.ciWorkflows.length) {
+    select.append(h('option', { value: '', text: 'Нет доступных workflows' }));
+  }
+  const base = $('#ciBaseUrl');
+  if (base && !base.value) base.value = state.ciBaseUrl || location.origin;
+  if (base && state.ciBaseUrl) base.value = state.ciBaseUrl;
+  const target = $('#ciTarget');
+  if (target && state.ciTarget) target.value = state.ciTarget;
+  for (const button of $$('.ci-platform')) {
+    button.classList.toggle('is-active', button.dataset.platform === state.ciPlatform);
+  }
+  const info = state.ciInfo;
+  const snippet = info ? (state.ciPlatform === 'gitlab' ? info.gitlab_ci : info.github_actions) : '';
+  state.ciSnippet = snippet || '';
+  $('#ciSnippet').textContent = snippet || 'Выберите workflow и нажмите «Сгенерировать».';
+  const status = $('#ciStatus');
+  if (state.ciLoading) {
+    status.textContent = 'Генерируем конфиг…';
+  } else if (state.ciError) {
+    status.textContent = state.ciError;
+    status.classList.add('is-error');
+  } else if (info) {
+    status.classList.remove('is-error');
+    status.textContent = `Workflow: ${info.workflow_id || state.ciWorkflowId} · CI-токен: ${info.ci_token_configured ? 'настроен' : 'не задан (добавьте LDWARDEN_CI_TOKEN)'}`;
+  } else {
+    status.textContent = 'Выберите workflow и нажмите «Сгенерировать».';
+  }
+  $('#ciCopyBtn').disabled = !snippet;
+  $('#ciDownloadBtn').disabled = !snippet;
+  $('#ciCheckBtn').disabled = !state.ciWorkflowId;
+}
+
+async function ciCheckWorkflow() {
+  const workflowId = state.ciWorkflowId || ($('#ciWorkflow') && $('#ciWorkflow').value);
+  if (!workflowId) return toast('Выберите workflow', 'warn');
+  const target = ($('#ciTarget') && $('#ciTarget').value.trim()) || '';
+  $('#ciCheckBtn').disabled = true;
+  $('#ciStatus').textContent = 'Пробный запуск…';
+  try {
+    const run = await api.ciCheck(workflowId, target);
+    const result = run.status === 'success' ? 'успешно' : run.status === 'failed' ? 'ошибка/gate' : run.status;
+    $('#ciStatus').textContent = `Пробный запуск: ${result}${run.gate ? ` · gate ${run.gate.passed ? 'пройден' : 'не пройден'}` : ''}`;
+    toast(`CI-проверка: ${result}`, run.status === 'success' ? 'ok' : 'warn');
+  } catch (error) {
+    $('#ciStatus').textContent = error && error.message ? error.message : 'Не удалось выполнить проверку';
+    toast('Не удалось выполнить CI-проверку', 'warn');
+  } finally {
+    $('#ciCheckBtn').disabled = false;
+  }
+}
+
+function renderGeneratorPage() {
+  const resultRoot = $('#generatorResult');
+  if (!resultRoot) return;
+  const status = $('#generatorStatus');
+  const button = $('#generatorRunBtn');
+  if (button) button.disabled = state.generatorLoading;
+  if (status) {
+    status.classList.toggle('is-error', Boolean(state.generatorError));
+    status.textContent = state.generatorLoading
+      ? 'Генерируем… локальная модель может думать до двух минут.'
+      : state.generatorError || 'AI выделит intent, граф соберёт backend.';
+  }
+  if (state.generatorLoading) {
+    resultRoot.replaceChildren(h('div', { class: 'workspace-empty' }, h('p', { text: 'AI разбирает описание и собирает сценарий…' })));
+    return;
+  }
+  const result = state.generatorResult;
+  if (!result) {
+    resultRoot.replaceChildren(h('div', { class: 'workspace-empty' },
+      h('h3', { text: 'Здесь появится превью' }),
+      h('p', { text: 'Опишите задачу, выберите пример или сгенерируйте сценарий с нуля.' })));
+    return;
+  }
+  let workflow;
+  try {
+    workflow = api.fromBackendWorkflow({ id: 'generator-preview', name: result.name, graph: result.graph });
+  } catch {
+    workflow = { nodes: [], edges: [] };
+  }
+  const nodes = workflow.nodes || [];
+  const warnings = result.warnings || [];
+  const card = h('article', { class: 'generator-preview' },
+    h('div', { class: 'generator-preview__head' },
+      h('div', {},
+        h('span', { class: 'workspace-page__kicker', text: result.provider === 'heuristic' ? 'Собрано эвристикой' : `AI · ${result.provider || 'LLM'}` }),
+        h('h2', { text: result.name || 'Сгенерированный сценарий' }),
+        h('p', { class: 'field__hint', text: result.description || `${nodes.length} узлов` }))),
+    warnings.length ? h('div', { class: 'generator-warnings' }, ...warnings.map((warning) => h('p', { text: `⚠ ${warning}` }))) : null,
+    h('div', { class: 'generator-node-list' }, ...nodes.map((node) => h('div', { class: 'generator-node' },
+      h('span', { class: 'generator-node__icon' }, svgIcon(nodeIcon(node.type))),
+      h('span', { class: 'generator-node__name', text: nodeTitle(node.type) }),
+      h('span', { class: 'field__hint', text: node.type })))),
+    h('div', { class: 'generator-preview__foot' },
+      h('span', { class: 'field__hint', text: `${nodes.length} ${plural(nodes.length, 'узел', 'узла', 'узлов')} · ${(workflow.edges || []).length} связей` }),
+      h('button', { class: 'btn btn--primary', id: 'generatorOpenBtn', type: 'button', text: 'Открыть в конструкторе' })),
+  );
+  resultRoot.replaceChildren(card);
+  $('#generatorOpenBtn').addEventListener('click', openGeneratedWorkflow);
+}
+
+async function runGenerator() {
+  const prompt = ($('#generatorPrompt') && $('#generatorPrompt').value.trim()) || '';
+  if (!prompt) {
+    toast('Опишите задачу текстом', 'warn');
+    return;
+  }
+  const source = ($('#generatorSource') && $('#generatorSource').value.trim()) || '';
+  state.generatorLoading = true;
+  state.generatorError = '';
+  state.generatorResult = null;
+  renderGeneratorPage();
+  try {
+    state.generatorResult = await api.generateWorkflow(prompt, source, false);
+  } catch (error) {
+    state.generatorError = error && error.message ? error.message : 'Не удалось сгенерировать сценарий';
+  } finally {
+    state.generatorLoading = false;
+    renderGeneratorPage();
+    if (state.generatorResult) toast('Сценарий сгенерирован', 'ok');
+  }
+}
+
+function openGeneratedWorkflow() {
+  if (!state.generatorResult) return;
+  try {
+    const workflow = api.fromBackendWorkflow({
+      id: 'wf-' + Date.now().toString(36),
+      name: state.generatorResult.name || 'Сгенерированный сценарий',
+      graph: state.generatorResult.graph,
+    });
+    if (!workflow.nodes.length) throw new Error('В сгенерированном графе нет узлов');
+    workflow.backendId = null;
+    state.workflow = workflow;
+    state.selectedNode = null;
+    state.selectedNodes = [];
+    state.selectedEdge = null;
+    state.activePresetId = null;
+    showWorkspace('graph');
+    renderAll();
+    fitView();
+    saveWorkflow();
+    toast('Сценарий открыт в конструкторе', 'ok');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'Не удалось открыть сценарий', 'warn');
+  }
+}
+
 function showWorkspace(view) {
   state.workspaceView = view;
   const isGraph = view === 'graph';
+  const isGenerator = view === 'generator';
   const isPresets = view === 'presets';
   const isLibrary = view === 'library';
   const isRuns = view === 'runs';
   const isNodes = view === 'nodes';
+  const isCi = view === 'ci';
   $('#graphLayout').hidden = !isGraph;
+  $('#generatorView').hidden = !isGenerator;
   $('#presetsView').hidden = !isPresets;
   $('#libraryView').hidden = !isLibrary;
   $('#runsView').hidden = !isRuns;
   $('#nodesView').hidden = !isNodes;
+  $('#ciView').hidden = !isCi;
   for (const tab of $$('#workspaceTabs .workspace-tab')) {
     tab.classList.toggle('is-active', tab.dataset.workspace === view);
   }
+  if (isGenerator) renderGeneratorPage();
   if (isPresets) renderPresets();
   if (isLibrary) openLibraryView();
   if (isRuns) openRunsView();
   else stopRunsPolling();
   if (isNodes) openNodesView();
+  if (isCi) openCiView();
   if (!isGraph) clearSelection();
 }
 
@@ -3049,26 +3423,38 @@ async function startRun() {
   }
 }
 
+function uiNodeId(nodeId) {
+  if (!nodeId || !String(nodeId).includes('/')) return nodeId;
+  const outer = String(nodeId).split('/')[0];
+  return findNode(outer) ? outer : nodeId;
+}
+
 function onEvent(event) {
   switch (event.type) {
     case 'run.started':
       setStatus(`Выполняется · ${event.total} ${plural(event.total, 'узел', 'узла', 'узлов')}`, 'run');
       break;
-    case 'node.started':
-      state.statuses[event.nodeId] = 'running';
-      updateNodeElement(event.nodeId);
+    case 'node.started': {
+      const id = uiNodeId(event.nodeId);
+      state.statuses[id] = 'running';
+      updateNodeElement(id);
       break;
-    case 'node.pending':
-      state.statuses[event.nodeId] = 'pending';
-      state.chips[event.nodeId] = event.chip || 'ждём';
-      updateNodeElement(event.nodeId);
+    }
+    case 'node.pending': {
+      const id = uiNodeId(event.nodeId);
+      state.statuses[id] = 'pending';
+      state.chips[id] = event.chip || 'ждём';
+      updateNodeElement(id);
       break;
-    case 'node.done':
-      state.statuses[event.nodeId] = event.status || 'done';
-      state.chips[event.nodeId] = event.chip || '';
-      if (event.output) state.outputs[event.nodeId] = event.output;
-      updateNodeElement(event.nodeId);
+    }
+    case 'node.done': {
+      const id = uiNodeId(event.nodeId);
+      state.statuses[id] = event.status || 'done';
+      state.chips[id] = event.chip || '';
+      if (event.output) state.outputs[id] = event.output;
+      updateNodeElement(id);
       break;
+    }
     case 'edge.active': {
       const wire = $(`.wire[data-id="${event.edgeId}"]`);
       if (wire) {
@@ -3612,6 +3998,39 @@ function bindEvents() {
     state.presetQuery = event.target.value;
     renderPresets();
   });
+  $('#generatorRunBtn').addEventListener('click', runGenerator);
+  for (const example of $$('#generatorExamples .preset')) {
+    example.addEventListener('click', () => {
+      const prompt = $('#generatorPrompt');
+      if (prompt) prompt.value = example.textContent || '';
+      state.generatorError = '';
+      renderGeneratorPage();
+    });
+  }
+  $('#ciRefreshBtn').addEventListener('click', () => loadCiView(true));
+  $('#ciGenerateBtn').addEventListener('click', generateCiSnippet);
+  $('#ciWorkflow').addEventListener('change', (event) => {
+    state.ciWorkflowId = event.target.value;
+    generateCiSnippet();
+  });
+  $('#ciBaseUrl').addEventListener('input', (event) => { state.ciBaseUrl = event.target.value.trim(); });
+  $('#ciTarget').addEventListener('input', (event) => { state.ciTarget = event.target.value.trim(); });
+  for (const platform of $$('.ci-platform')) {
+    platform.addEventListener('click', () => {
+      state.ciPlatform = platform.dataset.platform || 'github';
+      renderCiPage();
+    });
+  }
+  $('#ciCopyBtn').addEventListener('click', () => {
+    if (state.ciSnippet) copy(state.ciSnippet, 'CI-конфиг скопирован');
+  });
+  $('#ciDownloadBtn').addEventListener('click', () => {
+    if (!state.ciSnippet) return;
+    const filename = state.ciPlatform === 'gitlab' ? 'ldwarden-gitlab-ci.yml' : 'ldwarden-github-actions.yml';
+    download(filename, state.ciSnippet, 'text/yaml');
+    toast('CI-конфиг выгружен', 'ok');
+  });
+  $('#ciCheckBtn').addEventListener('click', ciCheckWorkflow);
   $('#libraryRefreshBtn').addEventListener('click', () => loadLibrary(true));
   for (const filter of $$('#libraryFilters .library-filter')) {
     filter.addEventListener('click', () => {
@@ -3668,8 +4087,39 @@ function bindEvents() {
 
   document.addEventListener('keydown', (event) => {
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement ? document.activeElement.tagName : '');
+    const mod = event.metaKey || event.ctrlKey;
+    const key = String(event.key || '').toLowerCase();
 
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    if (mod && !event.altKey && key === 's') {
+      event.preventDefault();
+      if (state.compositeEdit) saveCompositeEdit();
+      else saveCurrentAsPreset();
+      return;
+    }
+    if (!typing && mod && !event.altKey) {
+      if (key === 'z' && event.shiftKey) {
+        if (redo()) event.preventDefault();
+        return;
+      }
+      if (key === 'z') {
+        if (undo()) event.preventDefault();
+        return;
+      }
+      if (key === 'y') {
+        if (redo()) event.preventDefault();
+        return;
+      }
+      if (key === 'c') {
+        if (copySelectedNodes()) event.preventDefault();
+        return;
+      }
+      if (key === 'v') {
+        if (pasteNodes()) event.preventDefault();
+        return;
+      }
+    }
+
+    if (mod && event.key === 'Enter') {
       event.preventDefault();
       startRun();
       return;

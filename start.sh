@@ -84,6 +84,7 @@ labels = {
     "local": "локальная модель",
     "ollama": "Ollama",
     "openai": "OpenAI-совместимый API",
+    "universal": "универсальный OpenAI-совместимый API",
     "fake": "fallback",
     "none": "fallback (модель не подключена)",
 }

@@ -179,6 +179,7 @@ function mapParamsToBackend(node) {
       return { secret: params.secret || '', description: params.description || '' };
     case 'trigger.schedule':
       return {
+        enabled: params.enabled !== false,
         mode: params.mode || 'weekly',
         run_date: params.runDate || '',
         run_time: params.runTime || '09:00',
@@ -277,6 +278,7 @@ function mapParamsFromBackend(node) {
     case 'trigger.schedule':
       if (params.mode === 'weekly' || params.mode === 'once') {
         return {
+          enabled: params.enabled !== false,
           mode: params.mode,
           runDate: params.run_date || '',
           runTime: params.run_time || '09:00',
@@ -285,7 +287,7 @@ function mapParamsFromBackend(node) {
           cron: params.cron || '',
         };
       }
-      return { ...scheduleFromCron(params.cron), timezone: params.timezone || 'UTC' };
+      return { enabled: params.enabled !== false, ...scheduleFromCron(params.cron), timezone: params.timezone || 'UTC' };
     case 'trigger.webhook':
       return { secret: params.secret || '', description: params.description || '' };
     case 'source.target':
@@ -469,8 +471,9 @@ function mapTitle(item) {
 }
 
 function mapFinding(item, aiById = {}) {
+  const findingId = item.fingerprint || item.id;
   return {
-    id: item.id || item.fingerprint,
+    id: findingId,
     category: item.category,
     class: item.class,
     path: item.path,
@@ -480,7 +483,7 @@ function mapFinding(item, aiById = {}) {
     title: mapTitle(item),
     description: item.description || item.message || '',
     remediation: item.remediation || '',
-    why: (aiById[item.id] && aiById[item.id].explanation) || '',
+    why: (aiById[findingId] && aiById[findingId].explanation) || '',
     snippet: item.evidence || '',
     group: item.group,
     artifact: item.artifact,
@@ -564,8 +567,40 @@ async function listSchedules() {
   return request('/schedules');
 }
 
+async function cancelSchedule(workflowId, nodeId) {
+  return request('/schedules/cancel', {
+    method: 'POST',
+    body: { workflow_id: workflowId, node_id: nodeId },
+  });
+}
+
 async function workflowById(workflowId) {
   return request(`/workflows/${encodeURIComponent(workflowId)}`);
+}
+
+async function workflows() {
+  return request('/workflows?include_templates=1&limit=200');
+}
+
+async function generateWorkflow(prompt, source = '', save = false) {
+  return request('/ai/workflows/generate', {
+    method: 'POST',
+    body: { prompt, source, save },
+  });
+}
+
+async function ciSnippets(params = {}) {
+  const query = new URLSearchParams();
+  if (params.workflow_id) query.set('workflow_id', params.workflow_id);
+  if (params.base_url) query.set('base_url', params.base_url);
+  if (params.target) query.set('target', params.target);
+  return request(`/ci/snippets${query.toString() ? `?${query.toString()}` : ''}`);
+}
+
+async function ciCheck(workflowId, target = '') {
+  const body = { wait: true, ci_mode: true };
+  if (target) body.target = { kind: 'path', path: target };
+  return request(`/workflows/${encodeURIComponent(workflowId)}/runs`, { method: 'POST', body });
 }
 
 async function buildResult(runId, workflow, liveFindings) {
@@ -848,6 +883,10 @@ async function cancel(token) {
   }
 }
 
+async function cancelRun(runId) {
+  return request(`/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
 async function run(workflow, handlers = {}, token = { cancelled: false }) {
   if (!remoteAvailable) return runGraph(workflow, { ...handlers, token });
   try {
@@ -934,8 +973,13 @@ async function health() {
 export const api = {
   run,
   cancel,
+  cancelRun,
   loadWorkflow,
   saveWorkflow,
+  workflows,
+  generateWorkflow,
+  ciSnippets,
+  ciCheck,
   models,
   libraryPresets,
   libraryInstall,
@@ -960,6 +1004,7 @@ export const api = {
   runDetail,
   runFindings,
   listSchedules,
+  cancelSchedule,
   workflowById,
   toBackendGraph,
   fromBackendWorkflow,

@@ -86,6 +86,7 @@ export const NODE_TYPES = {
     icon: 'clock',
     title: 'По расписанию',
     sub: (p) => {
+      if (p.enabled === false) return 'выключено';
       if (p.mode === 'once') return `${p.runDate || 'дата не выбрана'} ${p.runTime || ''}`.trim();
       const days = { '*': 'каждый день', '1': 'пн', '2': 'вт', '3': 'ср', '4': 'чт', '5': 'пт', '6': 'сб', '7': 'вс' };
       const day = days[p.weekday] || 'день недели';
@@ -94,6 +95,7 @@ export const NODE_TYPES = {
     inputs: [],
     outputs: [{ id: 'out', kind: 'exec', label: 'Сработало' }],
     params: [
+      { key: 'enabled', label: 'Включено', type: 'toggle', def: true, hint: 'Выключенное расписание не запускается.' },
       {
         key: 'mode',
         label: 'Режим',
@@ -321,9 +323,9 @@ export const NODE_TYPES = {
         key: 'provider',
         label: 'Провайдер',
         type: 'select',
-        options: ['auto', 'local', 'openai', 'none'],
+        options: ['auto', 'local', 'openai', 'universal', 'none'],
         def: 'auto',
-        labels: { auto: 'auto (из настроек)', local: 'локальная GGUF', openai: 'OpenAI-совместимый', none: 'без LLM' },
+        labels: { auto: 'auto (из настроек)', local: 'локальная GGUF', openai: 'OpenAI-совместимый', universal: 'универсальный API', none: 'без LLM' },
       },
       {
         key: 'model',

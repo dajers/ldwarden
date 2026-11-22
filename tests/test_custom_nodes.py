@@ -111,6 +111,66 @@ class CustomNodeTests(unittest.TestCase):
         self.assertEqual(imported["name"], "Импорт")
         self.assertGreater(imported["version"], 1)
 
+    def test_ai_node_publishes_run_summary(self):
+        node = self.client.post(
+            "/api/custom-nodes",
+            json={
+                "name": "AI summary",
+                "kind": "ai",
+                "inputs": [{"id": "in", "kind": "exec"}],
+                "outputs": [{"id": "out", "kind": "exec"}],
+                "runtime": {
+                    "provider": "auto",
+                    "prompt": "Суммируй находки",
+                    "max_tokens": 128,
+                    "findings": {"enabled": False},
+                },
+            },
+        ).get_json()
+        graph = {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "position": {"x": 0, "y": 0}, "data": {}},
+                {"id": "c", "type": node["id"], "position": {"x": 250, "y": 0}, "data": {"params": {}}},
+            ],
+            "edges": [{"id": "e1", "source": "t", "target": "c"}],
+        }
+        workflow = self.client.post("/api/workflows", json={"name": "custom ai", "graph": graph}).get_json()
+        run = self.client.post(f"/api/workflows/{workflow['id']}/runs", json={"wait": True}).get_json()
+        self.assertEqual(run["status"], "success")
+        self.assertIn("summary", run["ai"])
+        self.assertTrue(run["ai"]["summary"])
+
+    def test_composite_without_inner_bindings_uses_boundaries(self):
+        composite = self.client.post(
+            "/api/custom-nodes",
+            json={
+                "name": "Без привязок",
+                "kind": "composite",
+                "inputs": [{"id": "in", "kind": "exec"}],
+                "outputs": [{"id": "out", "kind": "exec"}],
+                "runtime": {
+                    "graph": {
+                        "nodes": [
+                            {"id": "n1", "type": "notify.webhook", "position": {"x": 0, "y": 0},
+                             "data": {"params": {"url": "local://inbox"}}}
+                        ],
+                        "edges": [],
+                    }
+                },
+            },
+        ).get_json()
+        graph = {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "position": {"x": 0, "y": 0}, "data": {}},
+                {"id": "c", "type": composite["id"], "position": {"x": 250, "y": 0}, "data": {}},
+            ],
+            "edges": [{"id": "e1", "source": "t", "target": "c", "targetHandle": "in"}],
+        }
+        workflow = self.client.post("/api/workflows", json={"name": "composite auto", "graph": graph}).get_json()
+        run = self.client.post(f"/api/workflows/{workflow['id']}/runs", json={"wait": True}).get_json()
+        self.assertEqual(run["status"], "success")
+        self.assertIn("c/n1", run["summary"]["nodes"])
+
     def test_composite_node_expands(self):
         composite = self.client.post(
             "/api/custom-nodes",

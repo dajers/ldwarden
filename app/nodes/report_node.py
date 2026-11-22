@@ -35,8 +35,9 @@ class ReportBuildNode(BaseNode):
     def execute(self, ctx, params: dict) -> NodeResult:
         formats = params.get("formats") or ["md", "json", "sarif"]
         run_info = ctx.run_info()
+        findings = ctx.findings_for_node(ctx.node_id)
         reports = build_all(
-            ctx.findings,
+            findings,
             run_info,
             ai=ctx.ai_analysis if params.get("include_ai", True) else None,
             gate=ctx.gate,
@@ -44,7 +45,7 @@ class ReportBuildNode(BaseNode):
             formats=formats,
         )
         ctx.reports.update(reports)
-        counts = severity_counts(ctx.findings)
+        counts = severity_counts(findings)
         sizes = {name: len(value) for name, value in reports.items()}
         ctx.emit(
             "report.built",

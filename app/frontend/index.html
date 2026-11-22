@@ -124,11 +124,47 @@
 
   <nav class="workspace-tabs" id="workspaceTabs" aria-label="Разделы приложения">
     <button class="workspace-tab is-active" type="button" data-workspace="graph">Конструктор</button>
+    <button class="workspace-tab" type="button" data-workspace="generator">Генератор</button>
     <button class="workspace-tab" type="button" data-workspace="presets">Пресеты</button>
     <button class="workspace-tab" type="button" data-workspace="runs">Процессы</button>
+    <button class="workspace-tab" type="button" data-workspace="ci">CI/CD</button>
     <button class="workspace-tab" type="button" data-workspace="nodes">Ноды</button>
     <button class="workspace-tab" type="button" data-workspace="library">Библиотека</button>
   </nav>
+
+  <section class="workspace-page" id="generatorView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">AI-конструктор</span>
+        <h1>Генератор сценария</h1>
+        <p>Опишите задачу обычным текстом — AI извлечёт намерение, а backend соберёт проверенный граф из встроенных нод.</p>
+      </div>
+    </div>
+    <div class="generator-layout">
+      <div class="generator-form">
+        <div class="field">
+          <label class="field__label" for="generatorPrompt">Что нужно проверить?</label>
+          <textarea class="input input--area" id="generatorPrompt" rows="7" placeholder="Например: каждый день в 9:00 проверяй секреты и зависимости, сделай AI-сводку и отправь отчёт в Telegram"></textarea>
+        </div>
+        <div class="field">
+          <label class="field__label" for="generatorSource">Путь к проекту</label>
+          <input class="input" id="generatorSource" type="text" placeholder="Оставьте пустым — training-project" />
+        </div>
+        <div class="generator-examples" id="generatorExamples">
+          <button type="button" class="preset">Каждый день в 9:00 проверяй секреты и зависимости, сделай AI-сводку и отправь отчёт в Telegram</button>
+          <button type="button" class="preset">В CI на pull request запускай все сканеры, блокируй при HIGH и публикуй SARIF</button>
+          <button type="button" class="preset">Проверь авторизацию и SQL-инъекции, сделай отчёт без AI</button>
+        </div>
+        <div class="generator-actions">
+          <button class="btn btn--primary" id="generatorRunBtn" type="button">Сгенерировать сценарий</button>
+          <span class="field__hint" id="generatorStatus">AI выделит intent, граф соберёт backend.</span>
+        </div>
+      </div>
+      <div class="generator-result" id="generatorResult">
+        <div class="workspace-empty"><h3>Здесь появится превью</h3><p>Название, ноды, предупреждения и кнопка «Открыть в конструкторе».</p></div>
+      </div>
+    </div>
+  </section>
 
   <section class="workspace-page" id="presetsView" hidden>
     <div class="workspace-page__head">
@@ -196,6 +232,51 @@
       <h2 class="runs-block__title">История запусков <span class="runs-count" id="runsCount"></span></h2>
       <div class="runs-list" id="runsList"></div>
     </div>
+  </section>
+
+  <section class="workspace-page" id="ciView" hidden>
+    <div class="workspace-page__head">
+      <div>
+        <span class="workspace-page__kicker">Автоматизация</span>
+        <h1>CI/CD</h1>
+        <p>Запускайте сценарий как job в GitHub Actions или GitLab CI. Готовый конфиг можно скачать и положить в репозиторий.</p>
+      </div>
+      <div class="workspace-page__actions">
+        <button class="btn btn--ghost" id="ciRefreshBtn" type="button">Обновить</button>
+        <button class="btn btn--ghost" id="ciGenerateBtn" type="button">Сгенерировать</button>
+      </div>
+    </div>
+    <div class="ci-layout">
+      <div class="ci-form">
+        <div class="field">
+          <label class="field__label" for="ciWorkflow">Workflow</label>
+          <select class="select" id="ciWorkflow"></select>
+          <p class="field__hint">Одинаковые имена скрыты: показывается последняя сохранённая версия.</p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ciBaseUrl">Базовый URL LDWarden</label>
+          <input class="input" id="ciBaseUrl" type="url" placeholder="https://ldwarden.example.com" />
+          <p class="field__hint">Откуда CI будет вызывать API.</p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ciTarget">Путь к checkout на runner</label>
+          <input class="input" id="ciTarget" type="text" placeholder="Оставьте пустым — $GITHUB_WORKSPACE / $CI_PROJECT_DIR" />
+          <p class="field__hint">LDWarden должен видеть этот путь. Для внешнего сервера используйте self-hosted runner или ZIP-загрузку.</p>
+        </div>
+        <div class="ci-platforms" role="tablist" aria-label="Платформа CI">
+          <button class="ci-platform is-active" id="ciGithubBtn" type="button" data-platform="github">GitHub Actions</button>
+          <button class="ci-platform" id="ciGitlabBtn" type="button" data-platform="gitlab">GitLab CI</button>
+        </div>
+        <p class="ci-status" id="ciStatus">Загрузка…</p>
+        <div class="ci-actions">
+          <button class="btn btn--primary btn--sm" id="ciCopyBtn" type="button">Копировать</button>
+          <button class="btn btn--ghost btn--sm" id="ciDownloadBtn" type="button">Скачать конфиг</button>
+          <button class="btn btn--ghost btn--sm" id="ciCheckBtn" type="button">Пробный запуск</button>
+        </div>
+      </div>
+      <pre class="ci-snippet" id="ciSnippet">Выберите workflow и нажмите «Сгенерировать».</pre>
+    </div>
+    <p class="field__hint ci-note">Секрет <code>LDWARDEN_CI_TOKEN</code> добавляется в настройках CI. Отчёты сохраняются в artifacts; job завершится с ошибкой, если gate не пройден.</p>
   </section>
 
   <section class="workspace-page" id="libraryView" hidden>
@@ -274,7 +355,7 @@
         <span class="dot-sep">·</span>
         <span>перетащите узел за шапку · потяните от пина, чтобы соединить</span>
         <span class="dot-sep">·</span>
-        <span>колесо — масштаб, фон — панорама, Del — удалить</span>
+        <span>колесо — масштаб, ПКМ — панорама, Ctrl+S — сохранить как пресет, Ctrl+Z/C/V — отмена/копия/вставка</span>
       </div>
     </section>
 

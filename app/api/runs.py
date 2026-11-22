@@ -200,10 +200,9 @@ def _finding_from_row(row: FindingRow) -> Finding:
     )
 
 
-@bp.get("/runs/<run_id>/report")
-def run_report(run_id: str):
+def report_response(run_id: str, fmt: str = "md", download: bool = False):
     run = _run_or_404(run_id)
-    fmt = (request.args.get("format") or "md").lower()
+    fmt = (fmt or "md").lower()
     if fmt in {"markdown", "md"}:
         content, mime, ext = run.report_md, "text/markdown; charset=utf-8", "md"
     elif fmt == "json":
@@ -236,9 +235,18 @@ def run_report(run_id: str):
     if not content:
         raise ApiError("Отчёт ещё не сформирован", 404, "report_not_ready")
     headers = {"Content-Type": mime}
-    if get_bool(request.args.get("download"), False):
+    if download:
         headers["Content-Disposition"] = f'attachment; filename="ldwarden-{run_id}.{ext}"'
     return Response(content, headers=headers)
+
+
+@bp.get("/runs/<run_id>/report")
+def run_report(run_id: str):
+    return report_response(
+        run_id,
+        request.args.get("format") or "md",
+        get_bool(request.args.get("download"), False),
+    )
 
 
 @bp.get("/runs/<run_id>/ai")

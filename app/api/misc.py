@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import shlex
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -51,7 +52,7 @@ def _llm_ready(settings_) -> bool:
         except Exception:
             return False
         return True
-    if provider in {"openai", "ollama"}:
+    if provider in {"openai", "ollama", "universal"}:
         return bool(settings_.llm_base_url and settings_.llm_model)
     return provider in {"fake"}
 
@@ -73,7 +74,7 @@ def _llm_error(settings_) -> str:
         except Exception:
             return "Не установлен llama-cpp-python: ./venv/bin/pip install -r requirements-ai.txt"
         return ""
-    if provider in {"openai", "ollama"} and not settings_.llm_base_url:
+    if provider in {"openai", "ollama", "universal"} and not settings_.llm_base_url:
         return "Не задан LDWARDEN_LLM_BASE_URL"
     if provider == "none":
         return "LLM отключена (provider=none) — используется fallback"
@@ -129,6 +130,8 @@ def meta():
                 "sources": "/api/sources",
                 "generate": "/api/ai/workflows/generate",
                 "ci": "/api/ci/run",
+                "ci_snippets": "/api/ci/snippets",
+                "ci_report": "/api/ci/report/<run_id>",
                 "telegram": "/api/telegram/connect",
                 "openapi": "/api/openapi.json",
             },
@@ -313,40 +316,97 @@ def ci_status(run_id: str):
 def ci_snippets():
     workflow_id = request.args.get("workflow_id", "")
     base_url = (request.args.get("base_url") or request.host_url.rstrip("/")).rstrip("/")
-    body = json.dumps({"workflow_id": workflow_id, "wait": True}, ensure_ascii=False)
+    target = (request.args.get("target") or "").strip()
+    github_target = f"--arg target {shlex.quote(target)}" if target else '--arg target "$GITHUB_WORKSPACE"'
+    gitlab_target = f"--arg target {shlex.quote(target)}" if target else '--arg target "$CI_PROJECT_DIR"'
     github = f"""name: LDWarden security gate
 on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+
 jobs:
-  security:
+  ldwarden:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LDWARDEN_URL: {base_url}
+      LDWARDEN_CI_TOKEN: ${{{{ secrets.LDWARDEN_CI_TOKEN }}}}
+      LDWARDEN_WORKFLOW_ID: {workflow_id or "tpl-ci-gate"}
     steps:
       - uses: actions/checkout@v4
+
       - name: Run LDWarden workflow
-        env:
-          LDWARDEN_CI_TOKEN: ${{{{ secrets.LDWARDEN_CI_TOKEN }}}}
+        shell: bash
         run: |
-          response=$(curl -sS -X POST "{base_url}/api/ci/run" \\
+          set -euo pipefail
+          mkdir -p ldwarden-reports
+          payload=$(jq -n --arg workflow "$LDWARDEN_WORKFLOW_ID" {github_target} \\
+            '{{workflow_id:$workflow,wait:true,target:{{kind:"path",path:$target}}}}')
+          response=$(curl -sS --max-time 1800 -X POST "$LDWARDEN_URL/api/ci/run" \\
             -H "Content-Type: application/json" \\
             -H "X-CI-Token: $LDWARDEN_CI_TOKEN" \\
-            -d '{body}')
+            -d "$payload")
           echo "$response" | jq .
-          echo "$response" | jq -e '.exit_code == 0'
+          echo "$response" | jq -r .run_id > ldwarden-reports/run_id.txt
+          run_id=$(cat ldwarden-reports/run_id.txt)
+          for fmt in md json sarif html; do
+            curl -sS --max-time 300 -H "X-CI-Token: $LDWARDEN_CI_TOKEN" \\
+              "$LDWARDEN_URL/api/ci/report/${{run_id}}?format=$fmt" \\
+              -o "ldwarden-reports/report.$fmt" || true
+          done
+          exit_code=$(echo "$response" | jq -r .exit_code)
+          if [ "$exit_code" -ne 0 ]; then
+            echo "LDWarden gate failed (exit_code=$exit_code)" >&2
+            exit "$exit_code"
+          fi
+
+      - name: Upload LDWarden reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ldwarden-reports
+          path: ldwarden-reports/
+          if-no-files-found: ignore
+          retention-days: 7
 """
     gitlab = f"""ldwarden-security:
   image: alpine:3.20
   before_script:
     - apk add --no-cache curl jq
+  variables:
+    LDWARDEN_URL: "{base_url}"
+    LDWARDEN_WORKFLOW_ID: "{workflow_id or 'tpl-ci-gate'}"
   script:
     - |
-      response=$(curl -sS -X POST "{base_url}/api/ci/run" \\
+      set -eu
+      mkdir -p ldwarden-reports
+      payload=$(jq -n --arg workflow "$LDWARDEN_WORKFLOW_ID" {gitlab_target} \\
+        '{{workflow_id:$workflow,wait:true,target:{{kind:"path",path:$target}}}}')
+      response=$(curl -sS --max-time 1800 -X POST "$LDWARDEN_URL/api/ci/run" \\
         -H "Content-Type: application/json" \\
         -H "X-CI-Token: $LDWARDEN_CI_TOKEN" \\
-        -d '{body}')
+        -d "$payload")
       echo "$response" | jq .
-      echo "$response" | jq -e '.exit_code == 0'
+      run_id=$(echo "$response" | jq -r .run_id)
+      for fmt in md json sarif html; do
+        curl -sS --max-time 300 -H "X-CI-Token: $LDWARDEN_CI_TOKEN" \\
+          "$LDWARDEN_URL/api/ci/report/$run_id?format=$fmt" \\
+          -o "ldwarden-reports/report.$fmt" || true
+      done
+      exit_code=$(echo "$response" | jq -r .exit_code)
+      if [ "$exit_code" -ne 0 ]; then
+        echo "LDWarden gate failed (exit_code=$exit_code)" >&2
+        exit "$exit_code"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - ldwarden-reports/
+    expire_in: 7 days
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -355,11 +415,27 @@ jobs:
         {
             "base_url": base_url,
             "workflow_id": workflow_id,
+            "target": target,
+            "ci_token_configured": bool(settings().ci_token),
             "github_actions": github,
             "gitlab_ci": gitlab,
-            "notes": "Сохраните LDWARDEN_CI_TOKEN как секрет CI и включите нужную ветку.",
+            "notes": (
+                "1) Добавьте LDWARDEN_CI_TOKEN (и при необходимости LDWARDEN_URL) в секреты CI. "
+                "2) Для GitHub-hosted runner LDWarden должен видеть путь $GITHUB_WORKSPACE — "
+                "используйте self-hosted runner или загрузите ZIP через /api/sources. "
+                "3) В GitLab путь по умолчанию $CI_PROJECT_DIR."
+            ),
         }
     )
+
+
+@bp.get("/ci/report/<run_id>")
+def ci_report(run_id: str):
+    check_ci_token(settings())
+    from app.api.runs import report_response
+
+    fmt = request.args.get("format") or "md"
+    return report_response(run_id, fmt, download=True)
 
 
 @bp.post("/hooks/<workflow_id>")
@@ -515,6 +591,8 @@ def schedules_list():
             if node.get("type") != "trigger.schedule":
                 continue
             params = (node.get("data") or {}).get("params") or {}
+            if params.get("enabled") is False or (node.get("data") or {}).get("disabled"):
+                continue
             start = now
             state = ScheduleStateRow.get_or_none(
                 (ScheduleStateRow.workflow_id == workflow.id)
@@ -540,6 +618,34 @@ def schedules_list():
             )
     items.sort(key=lambda item: item["next_run"] or "9999")
     return jsonify({"items": items, "count": len(items)})
+
+
+@bp.post("/schedules/cancel")
+def schedule_cancel():
+    data = json_body()
+    workflow_id = str(data.get("workflow_id") or "").strip()
+    node_id = str(data.get("node_id") or "").strip()
+    if not workflow_id or not node_id:
+        raise ApiError("Укажите workflow_id и node_id", 400, "missing_schedule")
+    row = WorkflowRow.get_or_none(WorkflowRow.id == workflow_id)
+    if row is None:
+        raise ApiError("Workflow не найден", 404, "not_found")
+    if row.is_template or row.published:
+        raise ApiError("Шаблон нельзя отменить; откройте копию", 409, "template")
+    graph = j_loads(row.graph, {}) or {}
+    target = None
+    for node in graph.get("nodes", []):
+        if node.get("id") == node_id and node.get("type") == "trigger.schedule":
+            target = node
+            break
+    if target is None:
+        raise ApiError("Расписание не найдено", 404, "not_found")
+    target.setdefault("data", {}).setdefault("params", {})["enabled"] = False
+    row.graph = json.dumps(graph, ensure_ascii=False)
+    row.version = int(row.version or 1) + 1
+    row.updated_at = utcnow()
+    row.save()
+    return jsonify({"cancelled": True, "workflow_id": workflow_id, "node_id": node_id})
 
 
 @bp.post("/schedules/preview")

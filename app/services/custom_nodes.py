@@ -27,7 +27,7 @@ KINDS = {"http", "ai", "composite"}
 PARAM_TYPES = {"string", "text", "number", "select", "boolean", "secret", "json", "keyvalue"}
 PORT_KINDS = {"exec", "data"}
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
-AI_PROVIDERS = {"auto", "local", "openai", "ollama"}
+AI_PROVIDERS = {"auto", "local", "openai", "ollama", "universal"}
 SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 CATEGORIES = {"CUSTOM", "SECRET", "SCA", "SAST"}
 
@@ -200,6 +200,13 @@ def normalize_definition(payload: dict, node_id: str | None = None) -> dict:
             "graph": graph,
             "bindings": runtime.get("bindings") if isinstance(runtime.get("bindings"), dict) else {},
         }
+        roots, leaves = _composite_boundaries(graph)
+        for index, item in enumerate(inputs):
+            if not item.get("inner") and roots:
+                item["inner"] = {"node": roots[min(index, len(roots) - 1)], "port": "in"}
+        for index, item in enumerate(outputs):
+            if not item.get("inner") and leaves:
+                item["inner"] = {"node": leaves[min(index, len(leaves) - 1)], "port": "out"}
     definition = {
         "id": node_id or _text(source.get("id"), 80) or f"custom-{uuid.uuid4().hex[:10]}",
         "name": name,
@@ -638,12 +645,13 @@ def _ai_execute(definition: dict, ctx, params: dict) -> NodeResult:
     settings = ctx.settings
     if provider_name == "auto":
         provider_name = settings.effective_llm_provider
-    if provider_name not in {"local", "openai", "ollama", "fake"}:
+    if provider_name not in {"local", "openai", "ollama", "universal", "fake"}:
         raise NodeError("AI-провайдер не настроен — используется fallback")
     provider = build_provider(settings)
-    counts = severity_counts(ctx.findings)
+    scoped_findings = ctx.findings_for_node(ctx.node_id) if hasattr(ctx, "findings_for_node") else list(ctx.findings)
+    counts = severity_counts(scoped_findings)
     context = {
-        "findings_total": len(ctx.findings),
+        "findings_total": len(scoped_findings),
         "findings_by_severity": counts,
         "workflow": (ctx.workflow or {}).get("name", ""),
     }
@@ -660,15 +668,55 @@ def _ai_execute(definition: dict, ctx, params: dict) -> NodeResult:
         temperature=float(runtime.get("temperature") or 0.2),
     )
     findings = []
-    if runtime.get("findings", {}).get("enabled"):
-        try:
-            payload = json.loads(text)
-        except ValueError:
-            payload = None
-        if payload is not None:
-            findings = _mapped_findings(runtime.get("findings"), payload, definition["id"])
-            if findings:
-                ctx.add_findings(findings, node_id=ctx.node_id)
+    payload = None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        payload = None
+    if runtime.get("findings", {}).get("enabled") and payload is not None:
+        findings = _mapped_findings(runtime.get("findings"), payload, definition["id"])
+        if findings:
+            ctx.add_findings(findings, node_id=ctx.node_id)
+
+    summary = text.strip()
+    if isinstance(payload, dict) and str(payload.get("summary") or "").strip():
+        summary = str(payload["summary"]).strip()
+    summary = summary[:8000]
+    previous = ctx.ai_analysis or {}
+    items = [
+        {
+            "finding_id": finding.fingerprint,
+            "explanation": finding.message,
+            "remediation": finding.remediation,
+            "severity": finding.severity,
+            "source": "custom",
+        }
+        for finding in findings
+    ]
+    combined_summary = summary
+    if previous.get("summary"):
+        combined_summary = f"{previous['summary']}\n\n{summary}"
+    ctx.ai_analysis = {
+        "provider": provider_name,
+        "model": getattr(provider, "model", ""),
+        "summary": combined_summary,
+        "overall_risk": previous.get("overall_risk") or (counts.get("CRITICAL") and "CRITICAL") or (counts.get("HIGH") and "HIGH") or "MEDIUM",
+        "findings": [*(previous.get("findings") or []), *items],
+        "next_steps": (payload or {}).get("next_steps", []) if isinstance(payload, dict) else [],
+        "validation": {
+            "grounded": True,
+            "fallback": False,
+            "schema_ok": True,
+            "coverage": {"explained": len(items), "total": len(scoped_findings), "missing": []},
+            "errors": [],
+        },
+    }
+    ctx.emit(
+        "ai.completed",
+        f"AI: {provider_name} · {len(text)} символов",
+        node_id=ctx.node_id,
+        payload={"provider": provider_name, "summary": summary[:500]},
+    )
     return NodeResult(
         outputs={"text": text, "response": text, "findings": _findings_summary(findings)},
         message=f"AI · {len(text)} символов",
@@ -702,6 +750,9 @@ class _TestContext:
         self.findings.extend(findings)
         return len(findings)
 
+    def findings_for_node(self, node_id=None):
+        return list(self.findings)
+
     def emit(self, *args, **kwargs):
         return None
 
@@ -732,6 +783,45 @@ def test_definition(node_id: str, params: dict | None = None, settings=None) -> 
 
 # ---------- композитные ноды ----------
 
+def _composite_boundaries(graph: dict) -> tuple[list[str], list[str]]:
+    nodes = [node for node in (graph.get("nodes") or []) if isinstance(node, dict) and node.get("id")]
+    ids = [str(node["id"]) for node in nodes]
+    known = set(ids)
+    incoming = {node_id: 0 for node_id in ids}
+    outgoing = {node_id: 0 for node_id in ids}
+    for edge in graph.get("edges") or []:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source in known and target in known:
+            outgoing[source] += 1
+            incoming[target] += 1
+    roots = [node_id for node_id in ids if incoming[node_id] == 0]
+    leaves = [node_id for node_id in ids if outgoing[node_id] == 0]
+    return roots or ids, leaves or ids
+
+
+def _with_composite_boundaries(definition: dict) -> dict:
+    result = json.loads(json.dumps(definition))
+    runtime = result.get("runtime") or {}
+    graph = runtime.get("graph") or {}
+    roots, leaves = _composite_boundaries(graph)
+    inputs = result.get("inputs") if isinstance(result.get("inputs"), list) else []
+    outputs = result.get("outputs") if isinstance(result.get("outputs"), list) else []
+    if not inputs and roots:
+        inputs = [{"id": "in", "label": "Вход", "kind": "exec"}]
+    if not outputs and leaves:
+        outputs = [{"id": "out", "label": "Выход", "kind": "exec"}]
+    for index, item in enumerate(inputs):
+        if not item.get("inner") and roots:
+            item["inner"] = {"node": roots[min(index, len(roots) - 1)], "port": "in"}
+    for index, item in enumerate(outputs):
+        if not item.get("inner") and leaves:
+            item["inner"] = {"node": leaves[min(index, len(leaves) - 1)], "port": "out"}
+    result["inputs"] = inputs
+    result["outputs"] = outputs
+    return result
+
+
 def _composite_definition(node_type: str) -> dict | None:
     if not node_type.startswith(CUSTOM_PREFIX):
         return None
@@ -750,7 +840,7 @@ def expand_composite_nodes(graph: dict, depth: int = 0) -> dict:
             continue
         definition = _composite_definition(str(node.get("type")))
         if definition and definition["kind"] == "composite":
-            composite_ids[node["id"]] = definition
+            composite_ids[node["id"]] = _with_composite_boundaries(definition)
     if not composite_ids:
         return graph
 

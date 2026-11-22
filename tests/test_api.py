@@ -252,7 +252,7 @@ class ApiTests(unittest.TestCase):
         types = [node["type"] for node in data["graph"]["nodes"]]
         self.assertIn("trigger.schedule", types)
         self.assertIn("scan.secrets", types)
-        self.assertIn("notify.send", types)
+        self.assertIn("notify.webhook", types)
 
 
 class AuthTests(unittest.TestCase):

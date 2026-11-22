@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class AIAnalyzeNode(BaseNode):
                 {"value": "auto", "label": "auto (из настроек)"},
                 {"value": "local", "label": "local (GGUF/llama.cpp)"},
                 {"value": "openai", "label": "openai-совместимый API"},
+                {"value": "universal", "label": "универсальный API"},
                 {"value": "ollama", "label": "Ollama"},
                 {"value": "none", "label": "без LLM (fallback)"},
             ],
@@ -121,18 +123,27 @@ class AIAnalyzeNode(BaseNode):
                 n_ctx=settings.llm_n_ctx,
                 n_threads=threads,
             )
-        elif provider_name in {"openai", "ollama"}:
+        elif provider_name in {"openai", "ollama", "universal"}:
             base_url = settings.llm_base_url
             model = model_override or settings.llm_model
             if provider_name == "ollama":
                 base_url = base_url or "http://127.0.0.1:11434/v1"
                 model = model or "qwen2.5-coder:7b"
+            try:
+                extra_headers = json.loads(settings.llm_api_headers or "{}")
+            except ValueError:
+                extra_headers = {}
+            if not isinstance(extra_headers, dict):
+                extra_headers = {}
             provider = get_openai_provider(
                 base_url=base_url,
                 model=model,
                 api_key=settings.llm_api_key,
                 timeout=settings.llm_timeout,
                 provider_name=provider_name,
+                headers={str(k): str(v) for k, v in extra_headers.items()},
+                auth_header=settings.llm_auth_header,
+                auth_prefix=settings.llm_auth_prefix,
             )
         elif provider_name == "none":
             provider = NullProvider()
@@ -148,19 +159,20 @@ class AIAnalyzeNode(BaseNode):
         )
         service = AIService(effective, provider=provider)
         timeout = int(params.get("timeout") or 180)
+        findings = ctx.findings_for_node(ctx.node_id) if hasattr(ctx, "findings_for_node") else ctx.findings
         ctx.emit(
             "ai.started",
             f"AI-анализ запущен ({provider_name}, таймаут {timeout} с)",
             node_id=ctx.node_id,
-            payload={"provider": provider_name, "timeout": timeout, "findings": len(ctx.findings)},
+            payload={"provider": provider_name, "timeout": timeout, "findings": len(findings)},
         )
         result = service.analyze(
-            ctx.findings,
+            findings,
             meta={
                 "run_id": ctx.run_id,
                 "workflow": ctx.workflow.get("name") if ctx.workflow else "",
                 "source": ctx.source.to_dict() if ctx.source else {},
-                "counts": severity_counts(ctx.findings),
+                "counts": severity_counts(findings),
             },
             cancel_event=getattr(ctx, "cancel_event", None),
             timeout=timeout,
