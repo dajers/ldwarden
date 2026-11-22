@@ -8,7 +8,7 @@ from typing import Any
 
 import jsonschema
 
-from app.ai.prompts import SYSTEM_PROMPT, build_analysis_request, build_repair_request, build_workflow_intent_request
+from app.ai.prompts import SYSTEM_PROMPT, build_analysis_request, build_repair_request, build_workflow_ast_request
 from app.ai.providers import (
     FakeProvider,
     LLMProvider,
@@ -181,10 +181,10 @@ class AIService:
 
 
     def generate_workflow(self, prompt: str, source_hint: str = "") -> dict:
-        import app.nodes  # noqa: F401  (ensure the node registry is populated)
+        import app.nodes  # noqa: F401
         import app.ai.planner as planner
 
-        request = build_workflow_intent_request(prompt, source_hint=source_hint)
+        request = build_workflow_ast_request(prompt, source_hint=source_hint)
         warnings: list[str] = []
         raw = ""
         try:
@@ -194,35 +194,44 @@ class AIService:
                         "role": "system",
                         "content": (
                             "Ты — архитектор сценариев безопасности. "
-                            "Верни только валидный JSON с намерением сценария."
+                            "Верни только валидный JSON AST с порядком шагов и условиями."
                         ),
                     },
                     {"role": "user", "content": request},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.1,
-                max_tokens=384,
-                deadline=time.monotonic() + min(max(120, int(self.settings.llm_timeout or 180)), 240),
+                temperature=0.0,
+                max_tokens=1024,
+                deadline=time.monotonic() + min(max(180, int(self.settings.llm_timeout or 180)), 300),
             )
         except Exception as exc:
-            warnings.append(f"LLM не извлекла intent, использован эвристический разбор: {exc}")
-        intent = None
-        if raw:
-            parsed = self._parse_json(raw)
-            if parsed is not None:
-                try:
-                    jsonschema.validate(parsed, WORKFLOW_INTENT_SCHEMA)
+            warnings.append(f"LLM не вернула AST, использован эвристический разбор: {exc}")
+        parsed = self._parse_json(raw) if raw else None
+        if isinstance(parsed, dict):
+            try:
+                if isinstance(parsed.get("steps"), list):
+                    result = planner.compose_ast(parsed, source_hint=source_hint)
+                    report = result.get("validation") or {}
+                    if report.get("valid"):
+                        result["provider"] = getattr(self.provider, "name", "none")
+                        result["warnings"] = warnings + (result.get("warnings") or []) + (report.get("warnings") or [])
+                        return result
+                    warnings.append(
+                        "AST не прошёл валидацию: "
+                        + "; ".join(report.get("errors") or [])[:500]
+                        + "; использован эвристический разбор"
+                    )
+                elif isinstance(parsed.get("checks"), list):
+                    # Обратная совместимость с предыдущим intent-форматом.
                     intent = planner.merge_intent_with_prompt(parsed, prompt)
-                except jsonschema.ValidationError as exc:
-                    warnings.append(f"Ответ LLM не прошёл intent-схему: {exc.message}")
-        if intent is not None:
-            result = planner.compose_workflow(intent, source_hint=source_hint)
-            report = result.get("validation") or {}
-            if report.get("valid"):
-                result["provider"] = getattr(self.provider, "name", "none")
-                result["warnings"] = warnings + (result.get("warnings") or []) + (report.get("warnings") or [])
-                return result
-            warnings.append("LLM вернула intent, но граф не прошёл валидацию; использован эвристический разбор")
+                    result = planner.compose_workflow(intent, source_hint=source_hint)
+                    if (result.get("validation") or {}).get("valid"):
+                        result["provider"] = getattr(self.provider, "name", "none")
+                        result["warnings"] = warnings + (result.get("warnings") or [])
+                        return result
+                    warnings.append("Intent не прошёл валидацию; использован эвристический разбор")
+            except Exception as exc:
+                warnings.append(f"Не удалось собрать AST: {exc}; использован эвристический разбор")
         intent = planner.heuristic_intent(prompt)
         result = planner.compose_workflow(intent, source_hint=source_hint)
         result["provider"] = "heuristic"

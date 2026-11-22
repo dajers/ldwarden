@@ -185,20 +185,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse((self.settings.data_dir / "evil.txt").exists())
 
-    def test_any_target_is_allowed(self):
+    def test_arbitrary_target_is_rejected_by_default(self):
         import tempfile
         from pathlib import Path
 
-        folder = Path(tempfile.mkdtemp(prefix="ldw-any-target-"))
+        folder = Path(tempfile.mkdtemp(prefix="ldw-arbitrary-target-"))
         (folder / "app.py").write_text('PASSWORD = "super-secret-value"\n', encoding="utf-8")
         response = self.client.post(
             "/api/workflows/tpl-full-audit/runs",
             json={"wait": True, "target": {"kind": "path", "path": str(folder)}},
         )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"]["code"], "forbidden_target")
+
+    def test_arbitrary_target_can_be_enabled_explicitly(self):
+        import tempfile
+        from pathlib import Path
+
+        app, _settings = make_app(allow_arbitrary_paths=True)
+        client = app.test_client()
+        folder = Path(tempfile.mkdtemp(prefix="ldw-allowed-target-"))
+        (folder / "app.py").write_text('PASSWORD = "super-secret-value"\n', encoding="utf-8")
+        response = client.post(
+            "/api/workflows/tpl-full-audit/runs",
+            json={"wait": True, "target": {"kind": "path", "path": str(folder)}},
+        )
         self.assertEqual(response.status_code, 200)
-        run = response.get_json()
-        self.assertEqual(run["status"], "success")
-        self.assertGreaterEqual((run.get("summary") or {}).get("source", {}).get("files", 0), 1)
+        self.assertEqual(response.get_json()["status"], "success")
 
     def test_html_report(self):
         run = self.client.post(

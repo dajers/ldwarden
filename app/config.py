@@ -42,7 +42,8 @@ def _paths(name: str) -> list[Path]:
     for chunk in raw.replace(",", os.pathsep).split(os.pathsep):
         item = chunk.strip()
         if item:
-            result.append(Path(item).expanduser().resolve())
+            # Относительные пути разрешаются от BASE_DIR в Settings.__post_init__.
+            result.append(Path(item).expanduser())
     return result
 
 
@@ -58,6 +59,7 @@ class Settings:
     secret_key_path: Path = BASE_DIR / "data" / "secret.key"
     default_target: Path = BASE_DIR / "training-main" / "training-project"
     allowed_roots: list[Path] = field(default_factory=list)
+    allow_arbitrary_paths: bool = False
     vulnerability_db_path: Path = (
         BASE_DIR / "training-main" / "vulnerability-database" / "vulnerabilities.json"
     )
@@ -114,17 +116,24 @@ class Settings:
     log_level: str = "INFO"
     demo_inbox: bool = True
 
+    def _resolve_path(self, value: str | Path) -> Path:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = self.base_dir / path
+        return path.resolve()
+
     def __post_init__(self) -> None:
-        self.data_dir = Path(self.data_dir).expanduser().resolve()
-        self.db_path = Path(self.db_path).expanduser().resolve()
-        self.sources_dir = Path(self.sources_dir).expanduser().resolve()
-        self.tmp_dir = Path(self.tmp_dir).expanduser().resolve()
-        self.secret_key_path = Path(self.secret_key_path).expanduser().resolve()
-        self.default_target = Path(self.default_target).expanduser().resolve()
-        self.vulnerability_db_path = Path(self.vulnerability_db_path).expanduser().resolve()
-        self.workflow_templates_dir = Path(self.workflow_templates_dir).expanduser().resolve()
-        self.frontend_dir = Path(self.frontend_dir).expanduser().resolve()
-        self.llm_models_dir = Path(self.llm_models_dir).expanduser().resolve()
+        self.base_dir = Path(self.base_dir).expanduser().resolve()
+        self.data_dir = self._resolve_path(self.data_dir)
+        self.db_path = self._resolve_path(self.db_path)
+        self.sources_dir = self._resolve_path(self.sources_dir)
+        self.tmp_dir = self._resolve_path(self.tmp_dir)
+        self.secret_key_path = self._resolve_path(self.secret_key_path)
+        self.default_target = self._resolve_path(self.default_target)
+        self.vulnerability_db_path = self._resolve_path(self.vulnerability_db_path)
+        self.workflow_templates_dir = self._resolve_path(self.workflow_templates_dir)
+        self.frontend_dir = self._resolve_path(self.frontend_dir)
+        self.llm_models_dir = self._resolve_path(self.llm_models_dir)
         self.llm_model_path = self._resolve_model_path(self.llm_model_path)
         if not self.allowed_roots:
             self.allowed_roots = [
@@ -132,7 +141,7 @@ class Settings:
                 self.base_dir / "samples",
                 self.sources_dir,
             ]
-        self.allowed_roots = [Path(p).expanduser().resolve() for p in self.allowed_roots]
+        self.allowed_roots = [self._resolve_path(p) for p in self.allowed_roots]
 
 
     def _resolve_model_path(self, value: str | Path) -> Path:
@@ -153,10 +162,12 @@ class Settings:
             path.mkdir(parents=True, exist_ok=True)
 
     def resolve_allowed_path(self, value: str | Path) -> Path:
-        """Resolve a user supplied path.
+        """Resolve a user supplied path against the configured allow-list.
 
-        Сканировать можно любую существующую папку или файл — ограничения
-        allowed_roots больше не применяются (локальный инструмент).
+        По умолчанию разрешены только учебные материалы и загруженные
+        источники. Для доверенного локального проекта добавьте его в
+        LDWARDEN_ALLOWED_ROOTS или явно включите
+        LDWARDEN_ALLOW_ARBITRARY_PATHS=true.
         """
         path = Path(value).expanduser()
         if not path.is_absolute():
@@ -164,6 +175,17 @@ class Settings:
         resolved = path.resolve()
         if not resolved.exists():
             raise FileNotFoundError(f"Источник не найден: {resolved}")
+        if self.allow_arbitrary_paths:
+            return resolved
+        allowed = any(
+            resolved == root or root in resolved.parents for root in self.allowed_roots
+        )
+        if not allowed:
+            raise PermissionError(
+                "Сканирование этого пути запрещено. Добавьте проект в "
+                "LDWARDEN_ALLOWED_ROOTS или включите "
+                "LDWARDEN_ALLOW_ARBITRARY_PATHS=true для локального использования."
+            )
         return resolved
 
     def is_allowed_path(self, value: str | Path) -> bool:
@@ -292,6 +314,7 @@ def load_settings(overrides: dict | None = None) -> Settings:
         cors_origins=_str("LDWARDEN_CORS_ORIGINS", "*"),
         allow_local_webhooks=_bool("LDWARDEN_ALLOW_LOCAL_WEBHOOKS", True),
         allowed_git_hosts=[h.strip().lower() for h in _str("LDWARDEN_ALLOWED_GIT_HOSTS", "").split(",") if h.strip()],
+        allow_arbitrary_paths=_bool("LDWARDEN_ALLOW_ARBITRARY_PATHS", False),
         git_timeout=_int("LDWARDEN_GIT_TIMEOUT", 120),
         git_token=_str("LDWARDEN_GIT_TOKEN", ""),
         git_username=_str("LDWARDEN_GIT_USERNAME", "x-access-token"),

@@ -1337,3 +1337,67 @@ body, .topbar, .panel, .node, .node__head, .drawer, .modal__card, .inspector, .p
 .generator-node .field__hint { margin-left: auto; font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; }
 .generator-preview__foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
 @media (max-width: 900px) { .generator-layout { grid-template-columns: 1fr; } }
+
+.pin.is-magnet .pin__dot {
+  transform: scale(1.65);
+  border-color: #fff;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--rose) 26%, transparent), 0 0 18px var(--rose);
+}
+.pin.is-magnet .pin__label { color: var(--rose-ink); font-weight: 600; }
+
+/* ---------- генератор: превью сверху, задание снизу ---------- */
+#generatorView.generator-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+#generatorView[hidden] { display: none; }
+.generator-preview-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.generator-preview-pane .workspace-page__head { margin-bottom: 12px; }
+.generator-page .generator-result { flex: 1; min-height: 0; }
+.generator-composer {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+.generator-composer__main,
+.generator-composer__side { min-width: 0; }
+.generator-composer__main { display: flex; flex-direction: column; gap: 7px; }
+.generator-composer__main .input--area { min-height: 64px; max-height: 130px; resize: vertical; }
+.generator-composer__side { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
+.generator-composer__side .field { margin: 0; }
+.generator-composer .generator-examples { margin: 0; max-height: 54px; overflow: auto; }
+.generator-composer .generator-examples .preset { white-space: normal; }
+@media (max-width: 900px) {
+  #generatorView.generator-page { overflow: auto; }
+  .generator-composer { grid-template-columns: 1fr; }
+  .generator-preview-pane { overflow: visible; }
+  .generator-page .generator-result { min-height: 300px; }
+}
+
+/* data-связи: краткий payload после выполнения */
+.wire__data-label {
+  fill: var(--muted);
+  stroke: var(--canvas, var(--bg));
+  stroke-width: 4px;
+  paint-order: stroke fill;
+  font: 600 9.5px var(--sans);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+}
+.wire--data.is-selected .wire__data-label { fill: var(--wire-data); }

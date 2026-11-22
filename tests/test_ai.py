@@ -145,6 +145,65 @@ class AIServiceTests(unittest.TestCase):
         notify = next(node for node in result["graph"]["nodes"] if node["type"] == "notify.webhook")
         self.assertEqual(notify["data"]["params"]["url"], "local://inbox")
 
+    def test_ast_with_condition_is_composed(self):
+        provider = FakeProvider(
+            response={
+                "name": "CI condition",
+                "trigger": {"type": "webhook"},
+                "steps": [
+                    {"type": "source.target", "params": {}},
+                    {"type": "scan.sast", "params": {}},
+                    {
+                        "type": "condition",
+                        "field": "findings.CRITICAL",
+                        "operator": "gte",
+                        "value": "1",
+                        "then": [
+                            {"type": "report.build", "params": {"formats": ["md", "json"]}},
+                            {"type": "notify.telegram", "params": {}},
+                        ],
+                        "else": [{"type": "notify.webhook", "params": {}}],
+                    },
+                ],
+            }
+        )
+        result = AIService(self.settings, provider=provider).generate_workflow("Проверь критичные")
+        self.assertEqual(result["provider"], "fake")
+        self.assertTrue(result["validation"]["valid"])
+        types = [node["type"] for node in result["graph"]["nodes"]]
+        self.assertIn("logic.if", types)
+        self.assertIn("report.build", types)
+        self.assertIn("notify.telegram", types)
+        self.assertIn("notify.webhook", types)
+
+    def test_ast_gate_inside_branch_is_valid(self):
+        from app.ai.planner import compose_ast
+
+        result = compose_ast(
+            {
+                "name": "gate branch",
+                "trigger": {"type": "webhook"},
+                "steps": [
+                    {"type": "source.target", "params": {}},
+                    {"type": "scan.sast", "params": {}},
+                    {
+                        "type": "condition",
+                        "field": "findings.HIGH",
+                        "operator": "gt",
+                        "value": "0",
+                        "then": [{"type": "control.severity_gate", "params": {}}],
+                        "else": [],
+                    },
+                    {"type": "report.build", "params": {}},
+                    {"type": "notify.telegram", "params": {}},
+                ],
+            }
+        )
+        self.assertTrue(result["validation"]["valid"])
+        handles = {(edge["sourceHandle"]) for edge in result["graph"]["edges"]}
+        self.assertIn("pass", handles)
+        self.assertIn("fail", handles)
+
     def test_heuristic_ci_workflow(self):
         service = AIService(self.settings, provider=NullProvider())
         result = service.generate_workflow("В CI на каждый pull request проверяй код и блокируй при HIGH")

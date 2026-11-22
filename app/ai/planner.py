@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from app.core.graph import normalize_graph, validate_graph
+from app.core.registry import get_spec
 
 
 def _has(text: str, *words: str) -> bool:
@@ -280,6 +281,7 @@ def _edge(source: str, target: str, handle: str = "out") -> dict:
 
 
 def compose_workflow(intent: dict, source_hint: str = "") -> dict:
+    import app.nodes  # noqa: F401
     trigger = str(intent.get("trigger") or "manual").lower()
     if trigger not in INTENT_TRIGGERS:
         trigger = "manual"
@@ -409,3 +411,199 @@ def merge_intent_with_prompt(intent: dict, prompt: str) -> dict:
             if re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", prompt or ""):
                 result["schedule_time"] = _time_from_text(prompt)
     return result
+
+
+# ---------- ordered AST ----------
+
+AST_NODE_TYPES = {
+    "source.target",
+    "scan.secrets",
+    "scan.sca",
+    "scan.sast",
+    "ai.analyze",
+    "control.severity_gate",
+    "report.build",
+    "notify.webhook",
+    "notify.telegram",
+}
+AST_FIELDS = {
+    "findings.total",
+    "findings.CRITICAL",
+    "findings.HIGH",
+    "findings.MEDIUM",
+    "findings.LOW",
+    "findings.by_category.SECRET",
+    "findings.by_category.SAST",
+    "findings.by_category.SCA",
+    "gate.passed",
+    "ai.overall_risk",
+}
+AST_OPERATORS = {"eq", "ne", "gt", "gte", "lt", "lte", "contains", "truthy", "empty"}
+AST_MAX_STEPS = 24
+AST_MAX_DEPTH = 4
+
+
+class AstError(ValueError):
+    pass
+
+
+def _ast_steps(value, depth: int = 0) -> list:
+    if depth > AST_MAX_DEPTH:
+        raise AstError("Слишком глубокая вложенность условий")
+    if not isinstance(value, list):
+        raise AstError("steps/then/else должны быть массивами")
+    if len(value) > AST_MAX_STEPS:
+        raise AstError("Слишком много шагов")
+    result = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise AstError("Шаг должен быть объектом")
+        step_type = str(raw.get("type") or "").strip()
+        if step_type == "condition":
+            field = str(raw.get("field") or "").strip()
+            operator = str(raw.get("operator") or "").strip()
+            if field not in AST_FIELDS:
+                raise AstError(f"Недопустимое поле условия: {field}")
+            if operator not in AST_OPERATORS:
+                raise AstError(f"Недопустимый оператор условия: {operator}")
+            result.append({
+                "type": "condition",
+                "field": field,
+                "operator": operator,
+                "value": str(raw.get("value") if raw.get("value") is not None else ""),
+                "then": _ast_steps(raw.get("then") or [], depth + 1),
+                "else": _ast_steps(raw.get("else") or [], depth + 1),
+            })
+            continue
+        if step_type not in AST_NODE_TYPES:
+            raise AstError(f"Недопустимый тип ноды: {step_type}")
+        params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
+        result.append({"type": step_type, "params": params})
+    return result
+
+
+def normalize_ast(raw: dict) -> dict:
+    if not isinstance(raw, dict):
+        raise AstError("AST должен быть JSON-объектом")
+    trigger_raw = raw.get("trigger")
+    if isinstance(trigger_raw, str):
+        trigger = {"type": trigger_raw}
+    elif isinstance(trigger_raw, dict):
+        trigger = dict(trigger_raw)
+    else:
+        trigger = {"type": "manual"}
+    trigger_type = str(trigger.get("type") or "manual").lower()
+    if trigger_type not in {"manual", "schedule", "webhook"}:
+        raise AstError(f"Недопустимый триггер: {trigger_type}")
+    trigger["type"] = trigger_type
+    steps = _ast_steps(raw.get("steps") or [])
+    if not steps:
+        raise AstError("В сценарии нет шагов")
+    return {
+        "name": str(raw.get("name") or "Сгенерированный сценарий")[:160],
+        "description": str(raw.get("description") or "")[:4000],
+        "trigger": trigger,
+        "steps": steps,
+    }
+
+
+def compose_ast(ast: dict, source_hint: str = "") -> dict:
+    import app.nodes  # noqa: F401
+    ast = normalize_ast(ast)
+    trigger = ast["trigger"]
+    trigger_type = trigger["type"]
+    trigger_params: dict = {}
+    if trigger_type == "webhook":
+        trigger_params = {"secret": str(trigger.get("secret") or ""), "description": str(trigger.get("description") or "Запуск из CI/вебхука")}
+    elif trigger_type == "schedule":
+        mode = str(trigger.get("mode") or "weekly").lower()
+        mode = mode if mode in {"weekly", "once"} else "weekly"
+        run_date = str(trigger.get("date") or "")
+        if mode == "once" and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", run_date):
+            mode = "weekly"
+        run_time = str(trigger.get("time") or "09:00")
+        if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", run_time):
+            run_time = "09:00"
+        weekday = str(trigger.get("weekday") or "*")
+        if weekday not in {"*", "1", "2", "3", "4", "5", "6", "7"}:
+            weekday = "*"
+        trigger_params = {
+            "enabled": trigger.get("enabled") is not False,
+            "mode": mode,
+            "run_date": run_date if mode == "once" else "",
+            "run_time": run_time,
+            "weekday": weekday if mode == "weekly" else "*",
+            "timezone": str(trigger.get("timezone") or "Europe/Moscow"),
+            "cron": "",
+        }
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    counter = {"value": 0}
+
+    def add(node_type: str, params: dict | None = None) -> str:
+        counter["value"] += 1
+        node_id = f"ast-{counter['value']}"
+        nodes.append(_node(node_id, node_type, 80 + (len(nodes) % 8) * 250, 240 + (len(nodes) // 8) * 150, node_type, params or {}))
+        return node_id
+
+    def connect(source: str, target: str, handle: str = "out") -> None:
+        edges.append(_edge(source, target, handle))
+
+    trigger_id = add(f"trigger.{trigger_type}", trigger_params)
+    source_step = ast["steps"][0] if ast["steps"] and ast["steps"][0]["type"] == "source.target" else None
+    if source_step is not None:
+        source_params = dict(source_step.get("params") or {})
+        source_params.setdefault("path", source_hint or "")
+        source_id = add("source.target", source_params)
+        connect(trigger_id, source_id)
+        incoming = [(source_id, "out")]
+        steps = ast["steps"][1:]
+    else:
+        source_id = add("source.target", {"path": source_hint or ""})
+        connect(trigger_id, source_id)
+        incoming = [(source_id, "out")]
+        steps = ast["steps"]
+
+    def compile_steps(items: list, incoming_links: list[tuple[str, str]], depth: int = 0) -> list[tuple[str, str]]:
+        if depth > AST_MAX_DEPTH:
+            raise AstError("Слишком глубокая вложенность")
+        links = list(incoming_links)
+        for step in items:
+            if step["type"] == "condition":
+                cond_id = add("logic.if", {
+                    "field": step["field"],
+                    "operator": step["operator"],
+                    "value": step["value"],
+                    "case_sensitive": False,
+                })
+                for source, handle in links:
+                    connect(source, cond_id, handle)
+                then_links = compile_steps(step["then"], [(cond_id, "true")], depth + 1)
+                else_links = compile_steps(step["else"], [(cond_id, "false")], depth + 1)
+                links = then_links + else_links
+            else:
+                node_id = add(step["type"], step["params"])
+                for source, handle in links:
+                    connect(source, node_id, handle)
+                spec = get_spec(step["type"])
+                handles = [handle.id for handle in (spec.outputs if spec else [])]
+                if len(handles) > 1:
+                    links = [(node_id, handle) for handle in handles]
+                else:
+                    links = [(node_id, handles[0] if handles else "out")]
+        return links
+
+    compile_steps(steps, incoming)
+    graph = normalize_graph({"nodes": nodes, "edges": edges})
+    report = validate_graph(graph)
+    warnings = []
+    if report.get("errors"):
+        warnings.extend(report["errors"])
+    return {
+        "name": ast["name"],
+        "description": ast["description"],
+        "graph": report["graph"],
+        "validation": report,
+        "warnings": warnings,
+    }

@@ -137,3 +137,70 @@ def build_workflow_intent_request(prompt: str, source_hint: str = "") -> str:
         "source_hint": source_hint,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def build_workflow_ast_request(prompt: str, source_hint: str = "") -> str:
+    payload = {
+        "task": "generate_security_workflow_ast",
+        "language": "ru",
+        "rules": [
+            "Верни только валидный JSON без markdown.",
+            "Не создавай nodes, edges, id и координаты — только steps.",
+            "steps — упорядоченный массив. Порядок шагов = порядок выполнения.",
+            "Разрешённые type: source.target, scan.secrets, scan.sca, scan.sast, ai.analyze, control.severity_gate, report.build, notify.webhook, notify.telegram.",
+            "Для условия используй type=condition с полями field, operator, value, then, else; then/else — массивы шагов.",
+            "Допустимые field: findings.total, findings.CRITICAL, findings.HIGH, findings.MEDIUM, findings.LOW, findings.by_category.SECRET, findings.by_category.SAST, findings.by_category.SCA, gate.passed, ai.overall_risk.",
+            "Допустимые operator: eq, ne, gt, gte, lt, lte, contains, truthy, empty.",
+            "Максимум 24 шага и вложенность 4.",
+            "Для CI используй trigger.type=webhook и gate/condition по CRITICAL или HIGH.",
+            "Для расписания используй trigger.type=schedule, time HH:MM, weekday * или 1..7, mode weekly|once, date YYYY-MM-DD для once.",
+            "Если нужен отчёт, добавь report.build. Если нужно уведомление, добавь notify.webhook или notify.telegram.",
+        ],
+        "examples": [
+            {
+                "name": "Ежедневный аудит",
+                "trigger": {"type": "schedule", "mode": "weekly", "weekday": "*", "time": "09:00", "timezone": "Europe/Moscow"},
+                "steps": [
+                    {"type": "source.target", "params": {}},
+                    {"type": "scan.secrets", "params": {}},
+                    {"type": "scan.sca", "params": {}},
+                    {"type": "report.build", "params": {"formats": ["md", "json", "sarif"]}},
+                    {"type": "notify.webhook", "params": {"url": "local://inbox"}}
+                ]
+            },
+            {
+                "name": "CI gate",
+                "trigger": {"type": "webhook"},
+                "steps": [
+                    {"type": "source.target", "params": {}},
+                    {"type": "scan.secrets", "params": {}},
+                    {"type": "scan.sast", "params": {}},
+                    {
+                        "type": "condition",
+                        "field": "findings.CRITICAL",
+                        "operator": "gte",
+                        "value": "1",
+                        "then": [
+                            {"type": "report.build", "params": {"formats": ["md", "json", "sarif"]}},
+                            {"type": "notify.telegram", "params": {}}
+                        ],
+                        "else": [
+                            {"type": "notify.webhook", "params": {"url": "local://inbox"}}
+                        ]
+                    }
+                ]
+            },
+            {
+                "name": "Только статический анализ",
+                "trigger": {"type": "manual"},
+                "steps": [
+                    {"type": "source.target", "params": {}},
+                    {"type": "scan.sast", "params": {}},
+                    {"type": "report.build", "params": {"formats": ["md", "json"]}}
+                ]
+            }
+        ],
+        "user_request": prompt,
+        "source_hint": source_hint,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)

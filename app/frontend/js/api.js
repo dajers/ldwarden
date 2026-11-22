@@ -627,22 +627,12 @@ async function buildResult(runId, workflow, liveFindings) {
           why: aiById[finding.id].explanation || '',
         }))
     : [];
-  let report = {
-    formats: 'JSON + Markdown',
-    json: '',
-    markdown: '',
-  };
+  let report = null;
   if (run.report_json || run.report_markdown) {
     report = {
       formats: 'JSON + Markdown',
       json: run.report_json ? JSON.stringify(run.report_json, null, 2) : '',
       markdown: run.report_markdown || '',
-    };
-  } else if (findings.length) {
-    report = {
-      formats: 'JSON + Markdown',
-      json: JSON.stringify(toOutputJson(findings), null, 2),
-      markdown: toMarkdown(findings, { target: targetNameFrom(workflow) }),
     };
   }
   const notified = mapNotification(run.summary && run.summary.notification);

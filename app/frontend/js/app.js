@@ -612,13 +612,20 @@ function redo() {
 
 function copySelectedNodes() {
   const ids = new Set(state.selectedNodes || []);
+  if (state.selectedEdge) {
+    const edge = state.workflow.edges.find((item) => item.id === state.selectedEdge);
+    if (edge) {
+      ids.add(edge.from.node);
+      ids.add(edge.to.node);
+    }
+  }
   if (!ids.size) return false;
   const nodes = state.workflow.nodes.filter((node) => ids.has(node.id));
   const edges = state.workflow.edges.filter(
     (edge) => ids.has(edge.from.node) && ids.has(edge.to.node),
   );
   state.clipboard = { nodes: clone(nodes), edges: clone(edges) };
-  toast(`Скопировано узлов: ${nodes.length}`, 'ok');
+  toast(`Скопировано узлов: ${nodes.length}, связей: ${edges.length}`, 'ok');
   return true;
 }
 
@@ -630,12 +637,14 @@ function pasteNodes() {
     idMap.set(node.id, id);
     return { ...clone(node), id, x: (Number(node.x) || 0) + 40, y: (Number(node.y) || 0) + 40 };
   });
-  const pastedEdges = state.clipboard.edges.map((edge) => ({
-    ...clone(edge),
-    id: 'e-' + Math.random().toString(36).slice(2, 9),
-    from: { ...edge.from, node: idMap.get(edge.from.node) },
-    to: { ...edge.to, node: idMap.get(edge.to.node) },
-  })).filter((edge) => idMap.has(edge.from.node) && idMap.has(edge.to.node));
+  const pastedEdges = state.clipboard.edges
+    .filter((edge) => idMap.has(edge.from.node) && idMap.has(edge.to.node))
+    .map((edge) => ({
+      ...clone(edge),
+      id: 'e-' + Math.random().toString(36).slice(2, 9),
+      from: { ...edge.from, node: idMap.get(edge.from.node) },
+      to: { ...edge.to, node: idMap.get(edge.to.node) },
+    }));
   state.workflow.nodes.push(...pasted);
   state.workflow.edges.push(...pastedEdges);
   state.selectedNode = pasted[0] ? pasted[0].id : null;
@@ -644,7 +653,7 @@ function pasteNodes() {
   renderAll();
   renderInspector();
   saveWorkflow();
-  toast(`Вставлено узлов: ${pasted.length}`, 'ok');
+  toast(`Вставлено узлов: ${pasted.length}, связей: ${pastedEdges.length}`, 'ok');
   return true;
 }
 
@@ -716,6 +725,31 @@ function portKind(node, portId, dir) {
   const def = NODE_TYPES[node.type];
   const list = dir === 'out' ? def.outputs : def.inputs;
   return (list.find((p) => p.id === portId) || {}).kind || 'exec';
+}
+
+function nearestLinkMagnet(clientX, clientY, current) {
+  const viewport = $('#viewport').getBoundingClientRect();
+  let best = null;
+  for (const pinEl of $$('.pin')) {
+    if (pinEl.dataset.node === current.node.id) continue;
+    if (pinEl.dataset.kind !== current.kindPin) continue;
+    if (pinEl.dataset.dir === current.dir) continue;
+    const node = findNode(pinEl.dataset.node);
+    if (!node) continue;
+    const world = pinPosition(node, pinEl.dataset.port, pinEl.dataset.dir);
+    const x = viewport.left + state.view.x + world.x * state.view.z;
+    const y = viewport.top + state.view.y + world.y * state.view.z;
+    const distance = Math.hypot(x - clientX, y - clientY);
+    if (distance <= 46 && (!best || distance < best.distance)) {
+      best = { node, port: pinEl.dataset.port, dir: pinEl.dataset.dir, el: pinEl, distance, x: world.x, y: world.y };
+    }
+  }
+  return best;
+}
+
+function setLinkMagnet(target) {
+  for (const pinEl of $$('.pin.is-magnet')) pinEl.classList.remove('is-magnet');
+  if (target) target.el.classList.add('is-magnet');
 }
 
 function wireGeometry(from, to) {
@@ -1813,6 +1847,12 @@ function updateCompositeButton() {
   button.disabled = (state.selectedNodes || []).length === 0;
 }
 
+function updateSaveButton() {
+  const button = $('#savePresetBtn');
+  if (!button) return;
+  button.disabled = !state.workflow.nodes.length;
+}
+
 function openCompositeDialog() {
   if (!state.selectedNodes.length) {
     toast('Сначала выделите ноды, которые нужно свернуть', 'warn');
@@ -2083,7 +2123,7 @@ function renderGeneratorPage() {
     status.classList.toggle('is-error', Boolean(state.generatorError));
     status.textContent = state.generatorLoading
       ? 'Генерируем… локальная модель может думать до двух минут.'
-      : state.generatorError || 'AI выделит intent, граф соберёт backend.';
+      : state.generatorError || 'AI соберёт AST, backend превратит его в граф.';
   }
   if (state.generatorLoading) {
     resultRoot.replaceChildren(h('div', { class: 'workspace-empty' }, h('p', { text: 'AI разбирает описание и собирает сценарий…' })));
@@ -2234,11 +2274,19 @@ function resetStatuses() {
 /* отрисовка графа                                                     */
 /* ------------------------------------------------------------------ */
 
+function isScheduleOnlyWorkflow() {
+  const triggers = state.workflow.nodes.filter((node) => node.type.startsWith('trigger.'));
+  return triggers.length > 0 && triggers.every((node) => node.type === 'trigger.schedule');
+}
+
 function renderAll() {
   renderNodes();
   renderWires();
   updateEmpty();
   $('#footStats').textContent = `${state.workflow.nodes.length} ${plural(state.workflow.nodes.length, 'узел', 'узла', 'узлов')} · ${state.workflow.edges.length} ${plural(state.workflow.edges.length, 'связь', 'связи', 'связей')}`;
+  const runLabel = $('#runLabel');
+  if (runLabel && !state.running) runLabel.textContent = isScheduleOnlyWorkflow() ? 'В очередь' : 'Запустить';
+  updateSaveButton();
 }
 
 function updateEmpty() {
@@ -2338,6 +2386,29 @@ function renderPin(node, pin, dir, top) {
   return el;
 }
 
+function dataWireSummary(edge, output) {
+  if (!output || typeof output !== 'object') return '';
+  const port = edge.from.port;
+  const count = output.count ?? output.files ?? output.findings
+    ?? (Array.isArray(output.items) ? output.items.length : null);
+  if (port === 'files' && count != null) {
+    return `${count} ${plural(count, 'файл', 'файла', 'файлов')}`;
+  }
+  if (port === 'findings' && count != null) {
+    return `${count} ${plural(count, 'находка', 'находки', 'находок')}`;
+  }
+  if (port === 'payload') {
+    if (output.formats) return output.formats.join(' · ');
+    if (output.status) return output.status;
+    return 'payload';
+  }
+  if (output.formats) return output.formats.join(' · ');
+  if (output.overall_risk) return output.overall_risk;
+  if (output.summary) return 'AI-сводка';
+  if (count != null) return `${count} ${plural(count, 'запись', 'записи', 'записей')}`;
+  return '';
+}
+
 function renderWires() {
   const group = $('#wiresGroup');
   const frag = document.createDocumentFragment();
@@ -2377,6 +2448,26 @@ function renderWires() {
     });
 
     g.append(hit, casing, line, arrow);
+
+    if (kind === 'data') {
+      const output = state.outputs[from.id];
+      const summary = dataWireSummary(edge, output);
+      if (summary) {
+        const label = document.createElementNS(NS, 'text');
+        label.setAttribute('class', 'wire__data-label');
+        label.setAttribute('x', String((start.x + end.x) / 2));
+        label.setAttribute('y', String((start.y + end.y) / 2 - 7));
+        label.setAttribute('text-anchor', 'middle');
+        label.textContent = summary;
+        g.append(label);
+      }
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = output
+        ? JSON.stringify(output, null, 2).slice(0, 2500)
+        : 'Данные по этой связи ещё не сформированы';
+      g.append(title);
+    }
+
     frag.append(g);
   }
 
@@ -3144,6 +3235,7 @@ function startLink(event, node, pin, dir) {
     kindPin: pin.kind,
     origin,
     cursor: origin,
+    snap: null,
   };
 
   $('#tempWire').setAttribute('d', wireGeometry(origin, origin).d);
@@ -3227,8 +3319,19 @@ function onPointerMove(event) {
 
   if (interaction.kind === 'link') {
     const world = screenToWorld(event.clientX, event.clientY);
-    interaction.cursor = world;
-    $('#tempWire').setAttribute('d', wireGeometry(interaction.origin, world).d);
+    if (event.shiftKey) {
+      const magnet = nearestLinkMagnet(event.clientX, event.clientY, interaction);
+      interaction.snap = magnet;
+      setLinkMagnet(magnet);
+      const target = magnet ? { x: magnet.x, y: magnet.y } : world;
+      interaction.cursor = target;
+      $('#tempWire').setAttribute('d', wireGeometry(interaction.origin, target).d);
+    } else {
+      interaction.snap = null;
+      setLinkMagnet(null);
+      interaction.cursor = world;
+      $('#tempWire').setAttribute('d', wireGeometry(interaction.origin, world).d);
+    }
     return;
   }
 
@@ -3279,21 +3382,21 @@ function onPointerUp(event) {
 
   if (current.kind === 'link') {
     $('#tempWire').classList.remove('is-visible');
-    for (const el of $$('.pin.is-linkable')) el.classList.remove('is-linkable');
+    for (const el of $$('.pin.is-linkable, .pin.is-magnet')) el.classList.remove('is-linkable', 'is-magnet');
 
     const target = document.elementFromPoint(event.clientX, event.clientY);
     const pinEl = target && target.closest ? target.closest('.pin') : null;
-    if (!pinEl) return;
-
-    const other = findNode(pinEl.dataset.node);
-    if (!other) return;
+    const snap = current.snap;
+    const targetNode = pinEl ? findNode(pinEl.dataset.node) : snap ? snap.node : null;
+    const targetPort = pinEl ? pinEl.dataset.port : snap ? snap.port : null;
+    if (!targetNode || !targetPort) return;
 
     if (current.dir === 'out') {
-      if (connectPins(current.node, current.pin.id, other, pinEl.dataset.port)) {
+      if (connectPins(current.node, current.pin.id, targetNode, targetPort)) {
         renderWires();
         saveWorkflow();
       }
-    } else if (connectPins(other, pinEl.dataset.port, current.node, current.pin.id)) {
+    } else if (connectPins(targetNode, targetPort, current.node, current.pin.id)) {
       renderWires();
       saveWorkflow();
     }
@@ -3379,7 +3482,7 @@ function setRunning(active) {
   state.running = active;
   const button = $('#runBtn');
   button.classList.toggle('is-running', active);
-  $('#runLabel').textContent = active ? 'Остановить' : 'Запустить';
+  $('#runLabel').textContent = active ? 'Остановить' : (isScheduleOnlyWorkflow() ? 'В очередь' : 'Запустить');
   button.querySelector('use').setAttribute('href', active ? '#i-stop' : '#i-play');
 }
 
@@ -3388,6 +3491,28 @@ function setStatus(text, kind) {
   const dot = $('#statusDot');
   dot.classList.remove('is-run', 'is-done', 'is-error');
   if (kind) dot.classList.add('is-' + kind);
+}
+
+async function queueScheduledRun(scheduleNodes) {
+  const active = scheduleNodes.filter((node) => node.params.enabled !== false);
+  if (!active.length) {
+    toast('Расписание выключено — включите ноду «По расписанию»', 'warn');
+    return;
+  }
+  saveWorkflow();
+  clearTimeout(syncTimer);
+  if (!api.isRemote) {
+    toast('Сценарий сохранён локально; планировщик работает только с сервером', 'warn');
+    return;
+  }
+  const saved = await syncRemote();
+  if (!saved) {
+    toast('Не удалось сохранить расписание на сервере', 'warn');
+    return;
+  }
+  showWorkspace('runs');
+  toast('Сценарий добавлен в процессы и ждёт времени запуска', 'ok');
+  setStatus('Ожидает расписания', 'done');
 }
 
 async function startRun() {
@@ -3402,6 +3527,13 @@ async function startRun() {
 
   const problem = validate();
   if (problem) return toast(problem, 'warn');
+
+  const triggers = state.workflow.nodes.filter((node) => node.type.startsWith('trigger.'));
+  const scheduleNodes = triggers.filter((node) => node.type === 'trigger.schedule');
+  if (triggers.length && scheduleNodes.length === triggers.length) {
+    await queueScheduledRun(scheduleNodes);
+    return;
+  }
 
   resetStatuses();
   state.run = null;
@@ -3453,6 +3585,7 @@ function onEvent(event) {
       state.chips[id] = event.chip || '';
       if (event.output) state.outputs[id] = event.output;
       updateNodeElement(id);
+      renderWires();
       break;
     }
     case 'edge.active': {
@@ -3963,6 +4096,7 @@ function bindEvents() {
     tab.addEventListener('click', () => showWorkspace(tab.dataset.workspace));
   }
   $('#runBtn').addEventListener('click', startRun);
+  $('#savePresetBtn').addEventListener('click', saveCurrentAsPreset);
   $('#historyBtn').addEventListener('click', openModal);
   $('#runsRefreshBtn').addEventListener('click', () => loadRuns(true));
   $('#compositeBtn').addEventListener('click', openCompositeDialog);
@@ -4107,6 +4241,11 @@ function bindEvents() {
       }
       if (key === 'y') {
         if (redo()) event.preventDefault();
+        return;
+      }
+      if (key === 'a') {
+        event.preventDefault();
+        selectMany(state.workflow.nodes.map((node) => node.id));
         return;
       }
       if (key === 'c') {

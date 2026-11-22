@@ -42,7 +42,6 @@ from app.db import (
     j_loads,
     utcnow,
 )
-from app.reports.builder import build_all
 
 
 import app.nodes
@@ -683,16 +682,6 @@ class WorkflowEngine:
                 ctx.status = "success"
 
 
-            if not ctx.reports:
-                ctx.reports.update(
-                    build_all(
-                        ctx.findings,
-                        ctx.run_info(),
-                        ai=ctx.ai_analysis,
-                        gate=ctx.gate,
-                        source=ctx.source.to_dict() if ctx.source else None,
-                    )
-                )
             ctx.duration_ms = int((time.monotonic() - started) * 1000)
             summary = self._build_summary(ctx, node_states)
             run = RunRow.get_by_id(run_id)

@@ -102,7 +102,7 @@ else:
             import llama_cpp  # noqa: F401
         except Exception:
             detail += " · не установлен llama-cpp-python → ./scripts/setup-ai.sh"
-    elif provider in {"ollama", "openai"} and settings.llm_model:
+    elif provider in {"ollama", "openai", "universal"} and settings.llm_model:
         detail = f" · {settings.llm_model}"
     print(label + detail)
 PY

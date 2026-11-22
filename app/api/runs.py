@@ -210,6 +210,8 @@ def report_response(run_id: str, fmt: str = "md", download: bool = False):
     elif fmt == "sarif":
         content, mime, ext = run.report_sarif, "application/json; charset=utf-8", "sarif"
     elif fmt == "html":
+        if not (run.report_md or run.report_json or run.report_sarif):
+            raise ApiError("Отчёт ещё не сформирован", 404, "report_not_ready")
         rows = list(
             FindingRow.select().where(FindingRow.run_id == run.id).order_by(FindingRow.path, FindingRow.line)
         )
